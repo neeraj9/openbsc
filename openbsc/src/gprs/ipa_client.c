@@ -1,9 +1,9 @@
-/* GPRS Subscriber Update Protocol client */
+/* Osmocom Authentication Protocol client */
 
-/* (C) 2014 by Sysmocom s.f.m.c. GmbH
+/* (C) 2015 by Sysmocom s.f.m.c. GmbH
  * All Rights Reserved
  *
- * Author: Jacob Erlbeck
+ * Authors: Jakob Erlbeck, Neels Hofmeyr
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -33,99 +33,102 @@
 
 extern void *tall_bsc_ctx;
 
-static void start_test_procedure(struct gprs_gsup_client *gsupc);
+static void start_test_procedure(struct ipa_client *ipac);
 
-static void gsup_client_send_ping(struct gprs_gsup_client *gsupc)
+static void ipa_client_send_ping(struct ipa_client *ipac)
 {
-	struct msgb *msg = gprs_gsup_msgb_alloc();
+	struct msgb *msg = ipa_client_msgb_alloc();
 
 	msg->l2h = msgb_put(msg, 1);
 	msg->l2h[0] = IPAC_MSGT_PING;
 	ipa_msg_push_header(msg, IPAC_PROTO_IPACCESS);
-	ipa_client_conn_send(gsupc->link, msg);
+	ipa_client_conn_send(ipac->link, msg);
 }
 
-static int gsup_client_connect(struct gprs_gsup_client *gsupc)
+static int ipa_client_connect(struct ipa_client *ipac)
 {
 	int rc;
 
-	if (gsupc->is_connected)
+	if (ipac->is_connected)
 		return 0;
 
-	if (osmo_timer_pending(&gsupc->connect_timer)) {
+	if (osmo_timer_pending(&ipac->connect_timer)) {
 		LOGP(DLINP, LOGL_DEBUG,
-		     "GSUP connect: connect timer already running\n");
-		osmo_timer_del(&gsupc->connect_timer);
+		     "IPA connect: connect timer already running\n");
+		osmo_timer_del(&ipac->connect_timer);
 	}
 
-	if (osmo_timer_pending(&gsupc->ping_timer)) {
+	if (osmo_timer_pending(&ipac->ping_timer)) {
 		LOGP(DLINP, LOGL_DEBUG,
-		     "GSUP connect: ping timer already running\n");
-		osmo_timer_del(&gsupc->ping_timer);
+		     "IPA connect: ping timer already running\n");
+		osmo_timer_del(&ipac->ping_timer);
 	}
 
-	if (ipa_client_conn_clear_queue(gsupc->link) > 0)
-		LOGP(DLINP, LOGL_DEBUG, "GSUP connect: discarded stored messages\n");
+	if (ipa_client_conn_clear_queue(ipac->link) > 0)
+		LOGP(DLINP, LOGL_DEBUG, "IPA connect: discarded stored messages\n");
 
-	rc = ipa_client_conn_open(gsupc->link);
+	rc = ipa_client_conn_open(ipac->link);
 
 	if (rc >= 0) {
-		LOGP(DGPRS, LOGL_INFO, "GSUP connecting to %s:%d\n",
-		     gsupc->link->addr, gsupc->link->port);
+		LOGP(DGPRS, LOGL_INFO, "IPA connecting to %s:%d\n",
+		     ipac->link->addr, ipac->link->port);
 		return 0;
 	}
 
-	LOGP(DGPRS, LOGL_INFO, "GSUP failed to connect to %s:%d: %s\n",
-	     gsupc->link->addr, gsupc->link->port, strerror(-rc));
+	LOGP(DGPRS, LOGL_INFO, "IPA failed to connect to %s:%d: %s\n",
+	     ipac->link->addr, ipac->link->port, strerror(-rc));
 
 	if (rc == -EBADF || rc == -ENOTSOCK || rc == -EAFNOSUPPORT ||
 	    rc == -EINVAL)
 		return rc;
 
-	osmo_timer_schedule(&gsupc->connect_timer, GPRS_GSUP_RECONNECT_INTERVAL, 0);
+	osmo_timer_schedule(&ipac->connect_timer, IPA_CLIENT_RECONNECT_INTERVAL, 0);
 
-	LOGP(DGPRS, LOGL_INFO, "Scheduled timer to retry GSUP connect to %s:%d\n",
-	     gsupc->link->addr, gsupc->link->port);
+	LOGP(DGPRS, LOGL_INFO, "Scheduled timer to retry IPA connect to %s:%d\n",
+	     ipac->link->addr, ipac->link->port);
 
 	return 0;
 }
 
-static void connect_timer_cb(void *gsupc_)
+static void connect_timer_cb(void *ipac_)
 {
-	struct gprs_gsup_client *gsupc = gsupc_;
+	struct ipa_client *ipac = ipac_;
 
-	if (gsupc->is_connected)
+	if (ipac->is_connected)
 		return;
 
-	gsup_client_connect(gsupc);
+	ipa_client_connect(ipac);
 }
 
-static void gsup_client_updown_cb(struct ipa_client_conn *link, int up)
+static void ipa_client_updown_cb(struct ipa_client_conn *link, int up)
 {
-	struct gprs_gsup_client *gsupc = link->data;
+	struct ipa_client *ipac = link->data;
 
-	LOGP(DGPRS, LOGL_INFO, "GSUP link to %s:%d %s\n",
-		     link->addr, link->port, up ? "UP" : "DOWN");
+	LOGP(DGPRS, LOGL_INFO, "IPA link to %s:%d %s\n",
+	     link->addr, link->port, up ? "UP" : "DOWN");
 
-	gsupc->is_connected = up;
+	ipac->is_connected = up;
 
 	if (up) {
-		start_test_procedure(gsupc);
+		start_test_procedure(ipac);
 
-		osmo_timer_del(&gsupc->connect_timer);
+		osmo_timer_del(&ipac->connect_timer);
 	} else {
-		osmo_timer_del(&gsupc->ping_timer);
+		osmo_timer_del(&ipac->ping_timer);
 
-		osmo_timer_schedule(&gsupc->connect_timer,
-				    GPRS_GSUP_RECONNECT_INTERVAL, 0);
+		osmo_timer_schedule(&ipac->connect_timer,
+				    IPA_CLIENT_RECONNECT_INTERVAL, 0);
 	}
+
+	if (ipac->updown_cb != NULL)
+	      ipac->updown_cb(ipac, up);
 }
 
-static int gsup_client_read_cb(struct ipa_client_conn *link, struct msgb *msg)
+static int ipa_client_read_cb(struct ipa_client_conn *link, struct msgb *msg)
 {
 	struct ipaccess_head *hh = (struct ipaccess_head *) msg->data;
 	struct ipaccess_head_ext *he = (struct ipaccess_head_ext *) msgb_l2(msg);
-	struct gprs_gsup_client *gsupc = (struct gprs_gsup_client *)link->data;
+	struct ipa_client *ipac = (struct ipa_client *)link->data;
 	int rc;
 	static struct ipaccess_unit ipa_dev = {
 		.unit_name = "SGSN"
@@ -137,10 +140,10 @@ static int gsup_client_read_cb(struct ipa_client_conn *link, struct msgb *msg)
 
 	if (rc < 0) {
 		LOGP(DGPRS, LOGL_NOTICE,
-		     "GSUP received an invalid IPA/CCM message from %s:%d\n",
+		     "received an invalid IPA/CCM message from %s:%d\n",
 		     link->addr, link->port);
 		/* Link has been closed */
-		gsupc->is_connected = 0;
+		ipac->is_connected = 0;
 		msgb_free(msg);
 		return -1;
 	}
@@ -149,140 +152,154 @@ static int gsup_client_read_cb(struct ipa_client_conn *link, struct msgb *msg)
 		uint8_t msg_type = *(msg->l2h);
 		/* CCM message */
 		if (msg_type == IPAC_MSGT_PONG) {
-			LOGP(DGPRS, LOGL_DEBUG, "GSUP receiving PONG\n");
-			gsupc->got_ipa_pong = 1;
+			LOGP(DGPRS, LOGL_DEBUG, "IPA receiving PONG\n");
+			ipac->got_ipa_pong = 1;
 		}
 
 		msgb_free(msg);
 		return 0;
 	}
 
-	if (hh->proto != IPAC_PROTO_OSMO)
-		goto invalid;
-
-	if (!he || msgb_l2len(msg) < sizeof(*he) ||
-	    he->proto != IPAC_PROTO_EXT_GSUP)
+	if (!he || msgb_l2len(msg) < sizeof(*he))
 		goto invalid;
 
 	msg->l2h = &he->data[0];
 
-	OSMO_ASSERT(gsupc->read_cb != NULL);
-	gsupc->read_cb(gsupc, msg);
+	OSMO_ASSERT(ipac->read_cb != NULL);
+	ipac->read_cb(ipac, hh->proto, he->proto, msg);
 
 	/* Not freeing msg here, because that must be done by the read_cb. */
 	return 0;
 
 invalid:
 	LOGP(DGPRS, LOGL_NOTICE,
-	     "GSUP received an invalid IPA message from %s:%d, size = %d\n",
+	     "received an invalid IPA message from %s:%d, size = %d\n",
 	     link->addr, link->port, msgb_length(msg));
 
 	msgb_free(msg);
 	return -1;
 }
 
-static void ping_timer_cb(void *gsupc_)
+static void ping_timer_cb(void *ipac_)
 {
-	struct gprs_gsup_client *gsupc = gsupc_;
+	struct ipa_client *ipac = ipac_;
 
-	LOGP(DGPRS, LOGL_INFO, "GSUP ping callback (%s, %s PONG)\n",
-	     gsupc->is_connected ? "connected" : "not connected",
-	     gsupc->got_ipa_pong ? "got" : "didn't get");
+	LOGP(DGPRS, LOGL_INFO, "IPA ping callback (%s, %s PONG)\n",
+	     ipac->is_connected ? "connected" : "not connected",
+	     ipac->got_ipa_pong ? "got" : "didn't get");
 
-	if (gsupc->got_ipa_pong) {
-		start_test_procedure(gsupc);
+	if (ipac->got_ipa_pong) {
+		start_test_procedure(ipac);
 		return;
 	}
 
-	LOGP(DGPRS, LOGL_NOTICE, "GSUP ping timed out, reconnecting\n");
-	ipa_client_conn_close(gsupc->link);
-	gsupc->is_connected = 0;
+	LOGP(DGPRS, LOGL_NOTICE, "IPA ping timed out, reconnecting\n");
+	ipa_client_conn_close(ipac->link);
+	ipac->is_connected = 0;
 
-	gsup_client_connect(gsupc);
+	ipa_client_connect(ipac);
 }
 
-static void start_test_procedure(struct gprs_gsup_client *gsupc)
+static void start_test_procedure(struct ipa_client *ipac)
 {
-	gsupc->ping_timer.data = gsupc;
-	gsupc->ping_timer.cb = &ping_timer_cb;
+	ipac->ping_timer.data = ipac;
+	ipac->ping_timer.cb = &ping_timer_cb;
 
-	gsupc->got_ipa_pong = 0;
-	osmo_timer_schedule(&gsupc->ping_timer, GPRS_GSUP_PING_INTERVAL, 0);
-	LOGP(DGPRS, LOGL_DEBUG, "GSUP sending PING\n");
-	gsup_client_send_ping(gsupc);
+	ipac->got_ipa_pong = 0;
+	osmo_timer_schedule(&ipac->ping_timer, IPA_CLIENT_PING_INTERVAL, 0);
+	LOGP(DGPRS, LOGL_DEBUG, "IPA sending PING\n");
+	ipa_client_send_ping(ipac);
 }
 
-struct gprs_gsup_client *gprs_gsup_client_create(const char *ip_addr,
-						 unsigned int tcp_port,
-						 gprs_gsup_read_cb_t read_cb)
+struct ipa_client *ipa_client_create(const char *ip_addr,
+				     unsigned int tcp_port,
+				     ipa_client_updown_cb_t updown_cb,
+				     ipa_client_read_cb_t read_cb,
+				     void *data)
 {
-	struct gprs_gsup_client *gsupc;
+	struct ipa_client *ipac;
 	int rc;
 
-	gsupc = talloc_zero(tall_bsc_ctx, struct gprs_gsup_client);
-	OSMO_ASSERT(gsupc);
+	ipac = talloc_zero(tall_bsc_ctx, struct ipa_client);
+	OSMO_ASSERT(ipac);
 
-	gsupc->link = ipa_client_conn_create(gsupc,
-					     /* no e1inp */ NULL,
-					     0,
-					     ip_addr, tcp_port,
-					     gsup_client_updown_cb,
-					     gsup_client_read_cb,
-					     /* default write_cb */ NULL,
-					     gsupc);
-	if (!gsupc->link)
+	ipac->updown_cb = updown_cb;
+	ipac->read_cb = read_cb;
+	ipac->data = data;
+
+	ipac->link = ipa_client_conn_create(ipac,
+					    /* no e1inp */ NULL,
+					    0,
+					    ip_addr, tcp_port,
+					    ipa_client_updown_cb,
+					    ipa_client_read_cb,
+					    /* default write_cb */ NULL,
+					    ipac);
+	if (!ipac->link)
 		goto failed;
 
-	gsupc->connect_timer.data = gsupc;
-	gsupc->connect_timer.cb = &connect_timer_cb;
+	ipac->connect_timer.data = ipac;
+	ipac->connect_timer.cb = &connect_timer_cb;
 
-	rc = gsup_client_connect(gsupc);
+	rc = ipa_client_connect(ipac);
 
 	if (rc < 0)
 		goto failed;
 
-	gsupc->read_cb = read_cb;
+	ipac->read_cb = read_cb;
 
-	return gsupc;
+	return ipac;
 
 failed:
-	gprs_gsup_client_destroy(gsupc);
+	ipa_client_destroy(ipac);
 	return NULL;
 }
 
-void gprs_gsup_client_destroy(struct gprs_gsup_client *gsupc)
+void ipa_client_destroy(struct ipa_client *ipac)
 {
-	osmo_timer_del(&gsupc->connect_timer);
-	osmo_timer_del(&gsupc->ping_timer);
+	osmo_timer_del(&ipac->connect_timer);
+	osmo_timer_del(&ipac->ping_timer);
 
-	if (gsupc->link) {
-		ipa_client_conn_close(gsupc->link);
-		ipa_client_conn_destroy(gsupc->link);
-		gsupc->link = NULL;
+	if (ipac->link) {
+		ipa_client_conn_close(ipac->link);
+		ipa_client_conn_destroy(ipac->link);
+		ipac->link = NULL;
 	}
-	talloc_free(gsupc);
+	talloc_free(ipac);
 }
 
-int gprs_gsup_client_send(struct gprs_gsup_client *gsupc, struct msgb *msg)
+int ipa_client_send(struct ipa_client *ipac, uint8_t proto, uint8_t proto_ext,
+		    struct msgb *msg)
 {
-	if (!gsupc) {
+	OSMO_ASSERT(msg);
+
+	if (!ipac) {
 		msgb_free(msg);
 		return -ENOTCONN;
 	}
 
-	if (!gsupc->is_connected) {
+	if (!ipac->is_connected) {
 		msgb_free(msg);
 		return -EAGAIN;
 	}
 
-	ipa_prepend_header_ext(msg, IPAC_PROTO_EXT_GSUP);
-	ipa_msg_push_header(msg, IPAC_PROTO_OSMO);
-	ipa_client_conn_send(gsupc->link, msg);
+	// l2h is not sent over the wire, but for the test suite it makes sense
+	// to make l2h point at the IPA message payload.
+	unsigned char *l2h = msg->data;
+
+	ipa_prepend_header_ext(msg, proto);
+	ipa_msg_push_header(msg, proto_ext);
+
+	msg->l2h = l2h;
+
+	ipa_client_conn_send(ipac->link, msg);
 
 	return 0;
 }
 
-struct msgb *gprs_gsup_msgb_alloc(void)
+struct msgb *ipa_client_msgb_alloc(void)
 {
 	return msgb_alloc_headroom(4000, 64, __func__);
 }
+
+

@@ -21,7 +21,7 @@
  */
 
 #include <openbsc/gsm_subscriber.h>
-#include <openbsc/ipa_client.h>
+#include <openbsc/gprs_ipa_client.h>
 
 #include <openbsc/sgsn.h>
 #include <openbsc/gprs_sgsn.h>
@@ -44,44 +44,11 @@
 
 extern void *tall_bsc_ctx;
 
-static int gsup_read_cb(struct gprs_gsup_client *gsupc, struct msgb *msg);
-
 /* TODO: Some functions are specific to the SGSN, but this file is more general
  * (it has gprs_* name). Either move these functions elsewhere, split them and
  * move a part, or replace the gprs_ prefix by sgsn_. The applies to
- * gprs_subscr_init, gsup_read_cb, and gprs_subscr_tx_gsup_message.
+ * gprs_subscr_tx_gsup_message.
  */
-
-int gprs_subscr_init(struct sgsn_instance *sgi)
-{
-	const char *addr_str;
-
-	if (!sgi->cfg.gsup_server_addr.sin_addr.s_addr)
-		return 0;
-
-	addr_str = inet_ntoa(sgi->cfg.gsup_server_addr.sin_addr);
-
-	sgi->gsup_client = gprs_gsup_client_create(
-		addr_str, sgi->cfg.gsup_server_port,
-		&gsup_read_cb);
-
-	if (!sgi->gsup_client)
-		return -1;
-
-	return 1;
-}
-
-static int gsup_read_cb(struct gprs_gsup_client *gsupc, struct msgb *msg)
-{
-	int rc;
-
-	rc = gprs_subscr_rx_gsup_message(msg);
-	msgb_free(msg);
-	if (rc < 0)
-		return -1;
-
-	return rc;
-}
 
 int gprs_subscr_purge(struct gsm_subscriber *subscr);
 
@@ -159,7 +126,7 @@ void gprs_subscr_cancel(struct gsm_subscriber *subscr)
 static int gprs_subscr_tx_gsup_message(struct gsm_subscriber *subscr,
 				       struct gprs_gsup_message *gsup_msg)
 {
-	struct msgb *msg = gprs_gsup_msgb_alloc();
+	struct msgb *msg = ipa_client_msgb_alloc();
 
 	if (strlen(gsup_msg->imsi) == 0 && subscr)
 		strncpy(gsup_msg->imsi, subscr->imsi, sizeof(gsup_msg->imsi) - 1);
@@ -169,12 +136,12 @@ static int gprs_subscr_tx_gsup_message(struct gsm_subscriber *subscr,
 	LOGGSUBSCRP(LOGL_INFO, subscr,
 		    "Sending GSUP, will send: %s\n", msgb_hexdump(msg));
 
-	if (!sgsn->gsup_client) {
+	if (!sgsn->gprs_ipa_client) {
 		msgb_free(msg);
 		return -ENOTSUP;
 	}
 
-	return gprs_gsup_client_send(sgsn->gsup_client, msg);
+	return gprs_ipa_client_send_gsup(sgsn->gprs_ipa_client, msg);
 }
 
 static int gprs_subscr_tx_gsup_error_reply(struct gsm_subscriber *subscr,

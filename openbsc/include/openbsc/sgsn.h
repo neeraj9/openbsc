@@ -6,10 +6,11 @@
 
 #include <osmocom/gprs/gprs_ns.h>
 #include <openbsc/gprs_sgsn.h>
+#include <openbsc/gprs_oap.h>
 
 #include <ares.h>
 
-struct gprs_gsup_client;
+struct gprs_ipa_client;
 struct hostent;
 
 enum sgsn_auth_policy {
@@ -36,8 +37,8 @@ struct sgsn_config {
 	enum sgsn_auth_policy auth_policy;
 	struct llist_head imsi_acl;
 
-	struct sockaddr_in gsup_server_addr;
-	int gsup_server_port;
+	struct sockaddr_in ipa_server_addr;
+	int ipa_server_port;
 
 	int require_authentication;
 	int require_update_location;
@@ -61,6 +62,8 @@ struct sgsn_config {
 	} timers;
 
 	int dynamic_lookup;
+
+	struct gprs_oap_config oap;
 };
 
 struct sgsn_instance {
@@ -74,8 +77,8 @@ struct sgsn_instance {
 	struct osmo_timer_list gtp_timer;
 	/* GSN instance for libgtp */
 	struct gsn_t *gsn;
-	/* Subscriber */
-	struct gprs_gsup_client *gsup_client;
+	/* Subscriber and SGSN registration*/
+	struct gprs_ipa_client *gprs_ipa_client;
 	/* LLME inactivity timer */
 	struct osmo_timer_list llme_timer;
 

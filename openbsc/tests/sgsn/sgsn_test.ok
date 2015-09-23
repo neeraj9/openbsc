@@ -27,4 +27,9 @@ Testing P-TMSI allocation
   - Repeated RA Update Request
 Testing APN matching
 Testing GGSN selection
+Testing OAP API
+  - Config parsing
+  - AUTN failure
+  - AUTN success
+Testing SGSN registration
 Done

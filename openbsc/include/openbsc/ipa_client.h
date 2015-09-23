@@ -1,9 +1,10 @@
-/* GPRS Subscriber Update Protocol client */
+/* General IPA client.
+ * ipa_client is ping/pong connection checking on an ipa_client_conn. */
 
-/* (C) 2014 by Sysmocom s.f.m.c. GmbH
+/* (C) 2015 by Sysmocom s.f.m.c. GmbH
  * All Rights Reserved
  *
- * Author: Jacob Erlbeck
+ * Authors: Jacob Erlbeck, Neels Hofmeyr
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Affero General Public License as published by
@@ -21,22 +22,30 @@
  */
 #pragma once
 
+#include <stdint.h>
 #include <osmocom/core/timer.h>
 
-#define GPRS_GSUP_RECONNECT_INTERVAL 10
-#define GPRS_GSUP_PING_INTERVAL 20
+#define IPA_CLIENT_RECONNECT_INTERVAL 10
+#define IPA_CLIENT_PING_INTERVAL 20
 
 struct msgb;
 struct ipa_client_conn;
-struct gprs_gsup_client;
+struct ipa_client;
+
+typedef void (*ipa_client_updown_cb_t)(struct ipa_client *ipac, int up);
 
 /* Expects message in msg->l2h */
-typedef int (*gprs_gsup_read_cb_t)(struct gprs_gsup_client *gsupc, struct msgb *msg);
+typedef void (*ipa_client_read_cb_t)(struct ipa_client *ipac,
+				     uint8_t proto,
+				     uint8_t proto_ext,
+				     struct msgb *msg);
 
-struct gprs_gsup_client {
-	struct ipa_client_conn	*link;
-	gprs_gsup_read_cb_t	read_cb;
+struct ipa_client {
+	ipa_client_updown_cb_t	updown_cb;
+	ipa_client_read_cb_t	read_cb;
 	void			*data;
+
+	struct ipa_client_conn	*link;
 
 	struct osmo_timer_list	ping_timer;
 	struct osmo_timer_list	connect_timer;
@@ -44,11 +53,13 @@ struct gprs_gsup_client {
 	int			got_ipa_pong;
 };
 
-struct gprs_gsup_client *gprs_gsup_client_create(const char *ip_addr,
-						 unsigned int tcp_port,
-						 gprs_gsup_read_cb_t read_cb);
+struct ipa_client *ipa_client_create(const char *ip_addr,
+				     unsigned int tcp_port,
+				     ipa_client_updown_cb_t updown_cb,
+				     ipa_client_read_cb_t read_cb,
+				     void *data);
 
-void gprs_gsup_client_destroy(struct gprs_gsup_client *gsupc);
-int gprs_gsup_client_send(struct gprs_gsup_client *gsupc, struct msgb *msg);
-struct msgb *gprs_gsup_msgb_alloc(void);
+void ipa_client_destroy(struct ipa_client *ipac);
+int ipa_client_send(struct ipa_client *ipac, uint8_t proto, uint8_t proto_ext, struct msgb *msg);
+struct msgb *ipa_client_msgb_alloc(void);
 

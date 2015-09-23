@@ -33,34 +33,6 @@
 #include <stdint.h>
 
 
-static uint64_t decode_big_endian(const uint8_t *data, size_t data_len)
-{
-	uint64_t value = 0;
-
-	while (data_len > 0) {
-		value = (value << 8) + *data;
-		data += 1;
-		data_len -= 1;
-	}
-
-	return value;
-}
-
-static uint8_t *encode_big_endian(uint64_t value, size_t data_len)
-{
-	static uint8_t buf[sizeof(uint64_t)];
-	int idx;
-
-	OSMO_ASSERT(data_len <= ARRAY_SIZE(buf));
-
-	for (idx = data_len - 1; idx >= 0; idx--) {
-		buf[idx] = (uint8_t)value;
-		value = value >> 8;
-	}
-
-	return buf;
-}
-
 static int decode_pdp_info(uint8_t *data, size_t data_len,
 			  struct gprs_gsup_pdp_info *pdp_info)
 {
@@ -81,12 +53,12 @@ static int decode_pdp_info(uint8_t *data, size_t data_len,
 
 		switch (iei) {
 		case GPRS_GSUP_PDP_CONTEXT_ID_IE:
-			pdp_info->context_id = decode_big_endian(value, value_len);
+			pdp_info->context_id = gprs_decode_big_endian(value, value_len);
 			break;
 
 		case GPRS_GSUP_PDP_TYPE_IE:
 			pdp_info->pdp_type =
-				decode_big_endian(value, value_len) & 0x0fff;
+				gprs_decode_big_endian(value, value_len) & 0x0fff;
 			break;
 
 		case GPRS_GSUP_ACCESS_POINT_NAME_IE:
@@ -187,7 +159,7 @@ int gprs_gsup_decode(const uint8_t *const_data, size_t data_len,
 	if (rc < 0)
 		return -GMM_CAUSE_INV_MAND_INFO;
 
-	gsup_msg->message_type = decode_big_endian(value, 1);
+	gsup_msg->message_type = gprs_decode_big_endian(value, 1);
 
 	rc = gprs_match_tlv(&data, &data_len, GPRS_GSUP_IMSI_IE,
 			    &value, &value_len);
@@ -231,12 +203,12 @@ int gprs_gsup_decode(const uint8_t *const_data, size_t data_len,
 			continue;
 
 		case GPRS_GSUP_CAUSE_IE:
-			gsup_msg->cause = decode_big_endian(value, value_len);
+			gsup_msg->cause = gprs_decode_big_endian(value, value_len);
 			break;
 
 		case GPRS_GSUP_CANCEL_TYPE_IE:
 			gsup_msg->cancel_type =
-				decode_big_endian(value, value_len) + 1;
+				gprs_decode_big_endian(value, value_len) + 1;
 			break;
 
 		case GPRS_GSUP_PDP_INFO_COMPL_IE:
@@ -272,7 +244,7 @@ int gprs_gsup_decode(const uint8_t *const_data, size_t data_len,
 				pdp_info.have_info = 1;
 			} else {
 				pdp_info.context_id =
-					decode_big_endian(value, value_len);
+					gprs_decode_big_endian(value, value_len);
 			}
 
 			gsup_msg->pdp_infos[gsup_msg->num_pdp_infos++] =
@@ -334,8 +306,8 @@ static void encode_pdp_info(struct msgb *msg, enum gprs_gsup_iei iei,
 	if (pdp_info->pdp_type) {
 		msgb_tlv_put(msg, GPRS_GSUP_PDP_TYPE_IE,
 			     GPRS_GSUP_PDP_TYPE_SIZE,
-			     encode_big_endian(pdp_info->pdp_type | 0xf000,
-					       GPRS_GSUP_PDP_TYPE_SIZE));
+			     gprs_encode_big_endian(pdp_info->pdp_type | 0xf000,
+						    GPRS_GSUP_PDP_TYPE_SIZE));
 	}
 
 	if (pdp_info->apn_enc) {

@@ -52,3 +52,8 @@ int gprs_match_tlv(uint8_t **data, size_t *data_len,
 int gprs_shift_lv(uint8_t **data, size_t *data_len,
 		  uint8_t **value, size_t *value_len);
 
+uint64_t gprs_decode_big_endian(const uint8_t *data, size_t data_len);
+/* Not thread safe: returns pointer to static buffer. */
+uint8_t *gprs_encode_big_endian(uint64_t value, size_t data_len);
+
+int gprs_constant_time_cmp(const uint8_t *exp, const uint8_t *rel, const int count);

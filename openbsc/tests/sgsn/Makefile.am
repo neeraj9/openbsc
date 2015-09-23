@@ -10,7 +10,8 @@ sgsn_test_LDFLAGS = \
 	-Wl,--wrap=sgsn_update_subscriber_data \
 	-Wl,--wrap=gprs_subscr_request_update_location \
 	-Wl,--wrap=gprs_subscr_request_auth_info \
-	-Wl,--wrap=gprs_gsup_client_send
+	-Wl,--wrap=gprs_ipa_client_send_gsup \
+	-Wl,--wrap=ipa_client_conn_send
 
 sgsn_test_LDADD = \
 	$(top_builddir)/src/gprs/gprs_llc_parse.o \
@@ -24,7 +25,10 @@ sgsn_test_LDADD = \
 	$(top_builddir)/src/gprs/sgsn_auth.o \
 	$(top_builddir)/src/gprs/sgsn_ares.o \
 	$(top_builddir)/src/gprs/gprs_gsup_messages.o \
+	$(top_builddir)/src/gprs/gprs_oap_messages.o \
+	$(top_builddir)/src/gprs/gprs_oap.o \
 	$(top_builddir)/src/gprs/ipa_client.o \
+	$(top_builddir)/src/gprs/gprs_ipa_client.o \
 	$(top_builddir)/src/gprs/gprs_utils.o \
 	$(top_builddir)/src/gprs/gprs_subscriber.o \
 	$(top_builddir)/src/gprs/gsm_04_08_gprs.o \

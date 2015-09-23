@@ -47,6 +47,7 @@
 #include <openbsc/abis_nm.h>
 #include <openbsc/socket.h>
 #include <openbsc/vty.h>
+#include <openbsc/gprs_utils.h>
 
 #include <osmocom/ctrl/control_cmd.h>
 #include <osmocom/ctrl/control_if.h>
@@ -987,17 +988,6 @@ static void ipaccess_close_bsc(void *data)
 	bsc_close_connection(conn);
 }
 
-/* Wishful thinking to generate a constant time compare */
-static int constant_time_cmp(const uint8_t *exp, const uint8_t *rel, const int count)
-{
-	int x = 0, i;
-
-	for (i = 0; i < count; ++i)
-		x |= exp[i] ^ rel[i];
-
-	return x != 0;
-}
-
 static int verify_key(struct bsc_connection *conn, struct bsc_config *conf, const uint8_t *key, const int keylen)
 {
 	struct osmo_auth_vector vec;
@@ -1024,11 +1014,11 @@ static int verify_key(struct bsc_connection *conn, struct bsc_config *conf, cons
 
 	if (vec.res_len != 8) {
 		LOGP(DNAT, LOGL_ERROR, "Res length is wrong: %d for bsc nr %d\n",
-			keylen, conf->nr);
+			(int)vec.res_len, conf->nr);
 		return 0;
 	}
 
-	return constant_time_cmp(vec.res, key, 8) == 0;
+	return gprs_constant_time_cmp(vec.res, key, 8) == 0;
 }
 
 static void ipaccess_auth_bsc(struct tlv_parsed *tvp, struct bsc_connection *bsc)

@@ -397,3 +397,42 @@ fail:
 	return -1;
 }
 
+uint64_t gprs_decode_big_endian(const uint8_t *data, size_t data_len)
+{
+	uint64_t value = 0;
+
+	while (data_len > 0) {
+		value = (value << 8) + *data;
+		data += 1;
+		data_len -= 1;
+	}
+
+	return value;
+}
+
+uint8_t *gprs_encode_big_endian(uint64_t value, size_t data_len)
+{
+	static uint8_t buf[sizeof(uint64_t)];
+	int idx;
+
+	OSMO_ASSERT(data_len <= ARRAY_SIZE(buf));
+
+	for (idx = data_len - 1; idx >= 0; idx--) {
+		buf[idx] = (uint8_t)value;
+		value = value >> 8;
+	}
+
+	return buf;
+}
+
+/* Wishful thinking to generate a constant time compare */
+int gprs_constant_time_cmp(const uint8_t *exp, const uint8_t *rel, const int count)
+{
+	int x = 0, i;
+
+	for (i = 0; i < count; ++i)
+		x |= exp[i] ^ rel[i];
+
+	return x != 0;
+}
+

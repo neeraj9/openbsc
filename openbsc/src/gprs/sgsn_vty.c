@@ -34,13 +34,14 @@
 #include <openbsc/gprs_sgsn.h>
 #include <openbsc/vty.h>
 #include <openbsc/gsm_04_08_gprs.h>
-#include <openbsc/ipa_client.h>
 
 #include <osmocom/vty/command.h>
 #include <osmocom/vty/vty.h>
 #include <osmocom/vty/misc.h>
 
 #include <osmocom/abis/ipa.h>
+#include <openbsc/ipa_client.h>
+#include <openbsc/gprs_ipa_client.h>
 
 #include <pdp.h>
 
@@ -208,12 +209,12 @@ static int config_write_sgsn(struct vty *vty)
 	vty_out(vty, " auth-policy %s%s",
 		get_value_string(sgsn_auth_pol_strs, g_cfg->auth_policy),
 		VTY_NEWLINE);
-	if (g_cfg->gsup_server_addr.sin_addr.s_addr)
-		vty_out(vty, " gsup remote-ip %s%s",
-			inet_ntoa(g_cfg->gsup_server_addr.sin_addr), VTY_NEWLINE);
-	if (g_cfg->gsup_server_port)
-		vty_out(vty, " gsup remote-port %d%s",
-			g_cfg->gsup_server_port, VTY_NEWLINE);
+	if (g_cfg->ipa_server_addr.sin_addr.s_addr)
+		vty_out(vty, " ipa remote-ip %s%s",
+			inet_ntoa(g_cfg->ipa_server_addr.sin_addr), VTY_NEWLINE);
+	if (g_cfg->ipa_server_port)
+		vty_out(vty, " ipa remote-port %d%s",
+			g_cfg->ipa_server_port, VTY_NEWLINE);
 	llist_for_each_entry(acl, &g_cfg->imsi_acl, list)
 		vty_out(vty, " imsi-acl add %s%s", acl->imsi, VTY_NEWLINE);
 
@@ -434,12 +435,12 @@ static void vty_dump_mmctx(struct vty *vty, const char *pfx,
 DEFUN(show_sgsn, show_sgsn_cmd, "show sgsn",
       SHOW_STR "Display information about the SGSN")
 {
-	if (sgsn->gsup_client) {
-		struct ipa_client_conn *link = sgsn->gsup_client->link;
+	if (sgsn->gprs_ipa_client) {
+		struct ipa_client *ipac = sgsn->gprs_ipa_client->ipac;
 		vty_out(vty,
-			"  Remote authorization: %sconnected to %s:%d via GSUP%s",
-			sgsn->gsup_client->is_connected ? "" : "not ",
-			link->addr, link->port,
+			"  Remote authorization: %sconnected to %s:%d via IPA%s",
+			ipac->is_connected ? "" : "not ",
+			ipac->link->addr, ipac->link->port,
 			VTY_NEWLINE);
 	}
 	/* FIXME: statistics */
@@ -873,24 +874,24 @@ DEFUN(update_subscr_update_auth_info, update_subscr_update_auth_info_cmd,
 	return CMD_SUCCESS;
 }
 
-DEFUN(cfg_gsup_remote_ip, cfg_gsup_remote_ip_cmd,
-	"gsup remote-ip A.B.C.D",
-	"GSUP Parameters\n"
-	"Set the IP address of the remote GSUP server\n"
+DEFUN(cfg_ipa_remote_ip, cfg_ipa_remote_ip_cmd,
+	"ipa remote-ip A.B.C.D",
+	"IPA Parameters\n"
+	"Set the IP address of the remote IPA (GSUP+OAP) server\n"
 	"IPv4 Address\n")
 {
-	inet_aton(argv[0], &g_cfg->gsup_server_addr.sin_addr);
+	inet_aton(argv[0], &g_cfg->ipa_server_addr.sin_addr);
 
 	return CMD_SUCCESS;
 }
 
-DEFUN(cfg_gsup_remote_port, cfg_gsup_remote_port_cmd,
-	"gsup remote-port <0-65535>",
-	"GSUP Parameters\n"
-	"Set the TCP port of the remote GSUP server\n"
+DEFUN(cfg_ipa_remote_port, cfg_ipa_remote_port_cmd,
+	"ipa remote-port <0-65535>",
+	"IPA Parameters\n"
+	"Set the TCP port of the remote IPA (GSUP+OAP) server\n"
 	"Remote TCP port\n")
 {
-	g_cfg->gsup_server_port = atoi(argv[0]);
+	g_cfg->ipa_server_port = atoi(argv[0]);
 
 	return CMD_SUCCESS;
 }
@@ -967,8 +968,8 @@ int sgsn_vty_init(void)
 	install_element(SGSN_NODE, &cfg_ggsn_gtp_version_cmd);
 	install_element(SGSN_NODE, &cfg_imsi_acl_cmd);
 	install_element(SGSN_NODE, &cfg_auth_policy_cmd);
-	install_element(SGSN_NODE, &cfg_gsup_remote_ip_cmd);
-	install_element(SGSN_NODE, &cfg_gsup_remote_port_cmd);
+	install_element(SGSN_NODE, &cfg_ipa_remote_ip_cmd);
+	install_element(SGSN_NODE, &cfg_ipa_remote_port_cmd);
 	install_element(SGSN_NODE, &cfg_apn_ggsn_cmd);
 	install_element(SGSN_NODE, &cfg_apn_imsi_ggsn_cmd);
 	install_element(SGSN_NODE, &cfg_apn_name_cmd);

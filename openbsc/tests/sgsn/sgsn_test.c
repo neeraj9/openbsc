@@ -24,9 +24,15 @@
 #include <openbsc/gprs_gmm.h>
 #include <openbsc/debug.h>
 #include <openbsc/gsm_subscriber.h>
-#include <openbsc/gprs_gsup_messages.h>
-#include <openbsc/ipa_client.h>
 #include <openbsc/gprs_utils.h>
+
+#include <osmocom/abis/ipa.h>
+#include <osmocom/gsm/protocol/ipaccess.h>
+#include <openbsc/ipa_client.h>
+#include <openbsc/gprs_ipa_client.h>
+#include <openbsc/gprs_gsup_messages.h>
+#include <openbsc/gprs_oap_messages.h>
+#include <openbsc/gprs_oap.h>
 
 #include <osmocom/gprs/gprs_bssgp.h>
 
@@ -89,14 +95,24 @@ int __wrap_gprs_subscr_request_auth_info(struct sgsn_mm_ctx *mmctx) {
 	return (*subscr_request_auth_info_cb)(mmctx);
 };
 
-/* override, requires '-Wl,--wrap=gprs_gsup_client_send' */
-int __real_gprs_gsup_client_send(struct gprs_gsup_client *gsupc, struct msgb *msg);
-int (*gprs_gsup_client_send_cb)(struct gprs_gsup_client *gsupc, struct msgb *msg) =
-	&__real_gprs_gsup_client_send;
+/* override, requires '-Wl,--wrap=gprs_ipa_client_send_gsup' */
+int __real_gprs_ipa_client_send_gsup(struct gprs_ipa_client *gipac, struct msgb *msg);
+int (*gprs_ipa_client_send_gsup_cb)(struct gprs_ipa_client *gipac, struct msgb *msg) =
+	&__real_gprs_ipa_client_send_gsup;
 
-int __wrap_gprs_gsup_client_send(struct gprs_gsup_client *gsupc, struct msgb *msg)
+int __wrap_gprs_ipa_client_send_gsup(struct gprs_ipa_client *gipac, struct msgb *msg)
 {
-	return (*gprs_gsup_client_send_cb)(gsupc, msg);
+	return (*gprs_ipa_client_send_gsup_cb)(gipac, msg);
+};
+
+/* override, requires '-Wl,--wrap=ipa_client_conn_send' */
+void __real_ipa_client_conn_send(struct ipa_client_conn *link, struct msgb *msg);
+void (*ipa_client_conn_send_cb)(struct ipa_client_conn *link, struct msgb *msg) =
+	&__real_ipa_client_conn_send;
+
+void __wrap_ipa_client_conn_send(struct ipa_client_conn *link, struct msgb *msg)
+{
+	return (*ipa_client_conn_send_cb)(link, msg);
 };
 
 static int count(struct llist_head *head)
@@ -651,7 +667,7 @@ static void test_subscriber_gsup(void)
 	update_subscriber_data_cb = __real_sgsn_update_subscriber_data;
 }
 
-int my_gprs_gsup_client_send_dummy(struct gprs_gsup_client *gsupc, struct msgb *msg)
+int my_gprs_ipa_client_send_gsup_dummy(struct gprs_ipa_client *gipac, struct msgb *msg)
 {
 	msgb_free(msg);
 	return 0;
@@ -1201,7 +1217,7 @@ static void test_gmm_attach_subscr_gsup_auth(int retry)
 	auth_info_skip = 0;
 }
 
-int my_gprs_gsup_client_send(struct gprs_gsup_client *gsupc, struct msgb *msg)
+int my_gprs_ipa_client_send_gsup(struct gprs_ipa_client *gipac, struct msgb *msg)
 {
 	struct gprs_gsup_message to_peer = {0};
 	struct gprs_gsup_message from_peer = {0};
@@ -1243,7 +1259,7 @@ int my_gprs_gsup_client_send(struct gprs_gsup_client *gsupc, struct msgb *msg)
 		return 0;
 	}
 
-	reply_msg = gprs_gsup_msgb_alloc();
+	reply_msg = ipa_client_msgb_alloc();
 	reply_msg->l2h = reply_msg->data;
 	gprs_gsup_encode(reply_msg, &from_peer);
 	gprs_subscr_rx_gsup_message(reply_msg);
@@ -1258,9 +1274,14 @@ static void test_gmm_attach_subscr_real_gsup_auth(int retry)
 	struct gsm_subscriber *subscr;
 
 	sgsn_inst.cfg.auth_policy = SGSN_AUTH_POLICY_REMOTE;
-	gprs_gsup_client_send_cb = my_gprs_gsup_client_send;
+	gprs_ipa_client_send_gsup_cb = my_gprs_ipa_client_send_gsup;
 
-	sgsn->gsup_client = talloc_zero(tall_bsc_ctx, struct gprs_gsup_client);
+	/* The sgsn->gprs_ipa_client will not have been initialized, because
+	   cfg.ipa_server_addr is unset. Allocate empty structs to use them in
+	   these tests. */
+	OSMO_ASSERT(sgsn->gprs_ipa_client == NULL);
+	sgsn->gprs_ipa_client = talloc_zero(tall_bsc_ctx, struct gprs_ipa_client);
+	sgsn->gprs_ipa_client->ipac = talloc_zero(tall_bsc_ctx, struct ipa_client);
 
 	if (retry) {
 		upd_loc_skip = 3;
@@ -1275,11 +1296,13 @@ static void test_gmm_attach_subscr_real_gsup_auth(int retry)
 	assert_no_subscrs();
 
 	sgsn->cfg.auth_policy = saved_auth_policy;
-	gprs_gsup_client_send_cb = __real_gprs_gsup_client_send;
+	gprs_ipa_client_send_gsup_cb = __real_gprs_ipa_client_send_gsup;
 	upd_loc_skip = 0;
 	auth_info_skip = 0;
-	talloc_free(sgsn->gsup_client);
-	sgsn->gsup_client = NULL;
+
+	talloc_free(sgsn->gprs_ipa_client->ipac);
+	talloc_free(sgsn->gprs_ipa_client);
+	sgsn->gprs_ipa_client = NULL;
 }
 
 /*
@@ -1842,7 +1865,7 @@ static void test_ggsn_selection(void)
 
 	printf("Testing GGSN selection\n");
 
-	gprs_gsup_client_send_cb = my_gprs_gsup_client_send_dummy;
+	gprs_ipa_client_send_gsup_cb = my_gprs_ipa_client_send_gsup_dummy;
 
 	/* Check for emptiness */
 	OSMO_ASSERT(gprs_subscr_get_by_imsi(imsi1) == NULL);
@@ -1961,8 +1984,307 @@ static void test_ggsn_selection(void)
 	sgsn_ggsn_ctx_free(ggcs[1]);
 	sgsn_ggsn_ctx_free(ggcs[2]);
 
-	gprs_gsup_client_send_cb = __real_gprs_gsup_client_send;
+	gprs_ipa_client_send_gsup_cb = __real_gprs_ipa_client_send_gsup;
 }
+
+static void test_oap(void)
+{
+	printf("Testing OAP API\n  - Config parsing\n");
+
+	// No ipa_server_addr set, so initialization should do nothing.
+	OSMO_ASSERT(gprs_ipa_client_init(sgsn) <= 0);
+	OSMO_ASSERT(sgsn->gprs_ipa_client == NULL);
+
+	struct gprs_oap_config *config = &(sgsn->cfg.oap);
+
+	struct gprs_oap_state _state = {0};
+	struct gprs_oap_state *state = &_state;
+
+	// verify uninitialized state at program start
+	OSMO_ASSERT(state->state == oap_uninitialized);
+
+	// make sure filling with zeros means uninitialized, too
+	memset(state, 0, sizeof(*state));
+	OSMO_ASSERT(state->state == oap_uninitialized);
+
+
+	// invalid sgsn_id and shared secret
+	config->sgsn_id = 0;
+	config->shared_secret = NULL;
+	OSMO_ASSERT( gprs_oap_init(config, state) == 0 );
+	OSMO_ASSERT(state->state == oap_disabled);
+
+	// reset state
+	memset(state, 0, sizeof(*state));
+
+	// only sgsn_id is invalid
+	config->sgsn_id = 0;
+	config->shared_secret = "0102030405060708090a0b0c0d0e0f10";
+	OSMO_ASSERT( gprs_oap_init(config, state) == 0 );
+	OSMO_ASSERT(state->state == oap_disabled);
+
+	memset(state, 0, sizeof(*state));
+
+	// omitted shared_secret
+	config->sgsn_id = 12345;
+	config->shared_secret = NULL;
+	OSMO_ASSERT( gprs_oap_init(config, state) == 0 );
+	OSMO_ASSERT(state->state == oap_disabled);
+
+	memset(state, 0, sizeof(*state));
+
+	// invalid hex chars in shared_secret config
+	config->sgsn_id = 12345;
+	config->shared_secret = "non-hex";
+	OSMO_ASSERT( gprs_oap_init(config, state) < 0 );
+	OSMO_ASSERT(state->state == oap_config_error);
+
+	memset(state, 0, sizeof(*state));
+
+	// shared secret too long (defined to be 16 octets)
+	config->sgsn_id = 12345;
+	config->shared_secret = "0102030405060708090a0b0c0d0e0f101112131415161718";
+	OSMO_ASSERT( gprs_oap_init(config, state) < 0 );
+	OSMO_ASSERT(state->state == oap_config_error);
+
+	memset(state, 0, sizeof(*state));
+
+	// odd number of hex chars
+	config->sgsn_id = 12345;
+	config->shared_secret = "01020304050607081";
+	OSMO_ASSERT( gprs_oap_init(config, state) < 0 );
+	OSMO_ASSERT(state->state == oap_config_error);
+
+	memset(state, 0, sizeof(*state));
+
+	// zero padding of shared secret (defined to be 16 octets)
+	config->sgsn_id = 12345;
+	config->shared_secret = "0102030405060708";
+	OSMO_ASSERT( gprs_oap_init(config, state) == 0 );
+	OSMO_ASSERT(state->state == oap_initialized);
+	OSMO_ASSERT(strcmp("01020304050607080000000000000000",
+			   osmo_hexdump_nospc(state->shared_secret, 16)) == 0);
+
+	memset(state, 0, sizeof(*state));
+
+
+
+	// mint configuration
+	config->sgsn_id = 12345;
+	config->shared_secret = "0102030405060708090a0b0c0d0e0f10";
+	OSMO_ASSERT( gprs_oap_init(config, state) == 0 );
+	OSMO_ASSERT(state->state == oap_initialized);
+	OSMO_ASSERT(strcmp(config->shared_secret,
+			   osmo_hexdump_nospc(state->shared_secret, 16)) == 0);
+
+	printf("  - AUTN failure\n");
+	uint8_t rx_random[16];
+	uint8_t rx_autn[16];
+
+	uint8_t tx_sres[4];
+	uint8_t tx_kc[8];
+
+	osmo_hexparse("0102030405060708090a0b0c0d0e0f10",
+		      rx_random, 16);
+
+	// wrong autn (by one bit)
+	osmo_hexparse("247d1e1c7fc1000008cc536e8788b027",
+		      rx_autn, 16);
+	OSMO_ASSERT(gprs_oap_evaluate_challenge(state, rx_random, rx_autn,
+						tx_sres, tx_kc)
+		    == -2);
+
+	printf("  - AUTN success\n");
+	// all correct
+	osmo_hexparse("347d1e1c7fc1000008cc536e8788b027",
+		      rx_autn, 16);
+	// a successful return value here indicates correct rx_autn
+	OSMO_ASSERT(gprs_oap_evaluate_challenge(state, rx_random, rx_autn,
+						tx_sres, tx_kc)
+		    == 0);
+	OSMO_ASSERT(strcmp("ce9da581", osmo_hexdump_nospc(tx_sres, sizeof(tx_sres))) == 0);
+	OSMO_ASSERT(strcmp("0a8356d779b197dd", osmo_hexdump_nospc(tx_kc, sizeof(tx_kc))) == 0);
+
+
+	// refuse to evaluate in uninitialized state
+	state->state = oap_uninitialized;
+	OSMO_ASSERT(gprs_oap_evaluate_challenge(state, rx_random, rx_autn,
+						tx_sres, tx_kc)
+		    == -1);
+	state->state = oap_disabled;
+	OSMO_ASSERT(gprs_oap_evaluate_challenge(state, rx_random, rx_autn,
+						tx_sres, tx_kc)
+		    == -1);
+	state->state = oap_config_error;
+	OSMO_ASSERT(gprs_oap_evaluate_challenge(state, rx_random, rx_autn,
+						tx_sres, tx_kc)
+		    == -1);
+}
+
+static int inject_rx_oap_message(const struct gprs_oap_message *oapm)
+{
+	fprintf(stderr, "inject_rx_oap_message: Injecting OAP Reply: %d\n", (int)oapm->message_type);
+
+	struct gprs_ipa_client *gipac = sgsn->gprs_ipa_client;
+	OSMO_ASSERT(gipac);
+
+	struct msgb *msg;
+	int rc;
+
+	msg = ipa_client_msgb_alloc();
+	OSMO_ASSERT(msg != NULL);
+
+	gprs_oap_encode(msg, oapm);
+
+	unsigned char *l2h = msg->data;
+
+	ipa_prepend_header_ext(msg, IPAC_PROTO_OSMO);
+	ipa_msg_push_header(msg, IPAC_PROTO_EXT_OAP);
+
+	msg->l2h = l2h;
+	OSMO_ASSERT(msg->l2h);
+
+	rc = gprs_oap_rx(gipac, msg);
+
+	msgb_free(msg);
+
+	return rc;
+}
+
+
+void my_ipa_client_conn_send(struct ipa_client_conn *link, struct msgb *msg)
+{
+	// Simulate the remote side, which replies to registration etc:
+	// decode the msgb that the sgsn sends, and feed the matching reply to
+	// gprs_oap_rx(), as msgb.
+
+	uint8_t *data = msgb_l2(msg);
+	size_t data_len = msgb_l2len(msg);
+	int rc = 0;
+
+	struct gprs_oap_message oap_msg = {0};
+
+	OSMO_ASSERT(data);
+	rc = gprs_oap_decode(data, data_len, &oap_msg);
+
+	if (rc < 0) {
+		printf("my_ipa_client_conn_send: decoding OAP message fails with error '%s' (%d)\n",
+		       get_value_string(gsm48_gmm_cause_names, -rc), -rc);
+		goto dealloc;
+	}
+
+	fprintf(stderr, "my_ipa_client_conn_send: Caught outgoing IPA message: %d\n", (int)oap_msg.message_type);
+
+	switch (oap_msg.message_type) {
+
+	case GPRS_OAP_MSGT_REGISTER_REQUEST:
+		// reply with challenge
+		{
+			OSMO_ASSERT(oap_msg.sgsn_id == 12345);
+			OSMO_ASSERT(!oap_msg.rand_present);
+			OSMO_ASSERT(!oap_msg.autn_present);
+			OSMO_ASSERT(!oap_msg.sres_present);
+			OSMO_ASSERT(!oap_msg.kc_present);
+
+			struct gprs_oap_message oap_reply = {0};
+			oap_reply.message_type = GPRS_OAP_MSGT_CHALLENGE_REQUEST;
+
+			osmo_hexparse("0102030405060708090a0b0c0d0e0f10",
+				      oap_reply.rand, 16);
+			oap_reply.rand_present = 1;
+
+			osmo_hexparse("347d1e1c7fc1000008cc536e8788b027",
+				      oap_reply.autn, 16);
+			oap_reply.autn_present = 1;
+
+			OSMO_ASSERT(inject_rx_oap_message(&oap_reply) >= 0);
+		}
+
+		break;
+
+	case GPRS_OAP_MSGT_CHALLENGE_RESULT:
+		// verify challenge reply, reply with registration ack
+		{
+			OSMO_ASSERT(!oap_msg.sgsn_id); // not present
+			OSMO_ASSERT(!oap_msg.rand_present);
+			OSMO_ASSERT(!oap_msg.autn_present);
+			OSMO_ASSERT(oap_msg.sres_present);
+			OSMO_ASSERT(oap_msg.kc_present);
+
+			OSMO_ASSERT(strcmp("ce9da581", osmo_hexdump_nospc(oap_msg.sres, sizeof(oap_msg.sres))) == 0);
+			OSMO_ASSERT(strcmp("0a8356d779b197dd", osmo_hexdump_nospc(oap_msg.kc, sizeof(oap_msg.kc))) == 0);
+
+			struct gprs_oap_message oap_reply = {0};
+			oap_reply.message_type = GPRS_OAP_MSGT_REGISTER_RESULT;
+
+			OSMO_ASSERT(inject_rx_oap_message(&oap_reply) >= 0);
+		}
+		break;
+
+	case GPRS_OAP_MSGT_REGISTER_ERROR:
+	case GPRS_OAP_MSGT_REGISTER_RESULT:
+	case GPRS_OAP_MSGT_CHALLENGE_REQUEST:
+	case GPRS_OAP_MSGT_CHALLENGE_ERROR:
+		printf("Not handled in this test: OAP message type %d\n", (int)oap_msg.message_type);
+		rc = -1;
+		goto dealloc;
+
+	default:
+		printf("Unknown OAP message type: %d\n", (int)oap_msg.message_type);
+		rc = -2;
+		goto dealloc;
+	}
+
+dealloc:
+	msgb_free(msg);
+}
+
+static void test_sgsn_registration(void)
+{
+	printf("Testing SGSN registration\n");
+
+	/* The sgsn->gprs_ipa_client will not have been initialized, because
+	   cfg.ipa_server_addr is unset. Allocate empty structs to use them in
+	   these tests. */
+	OSMO_ASSERT(sgsn->gprs_ipa_client == NULL);
+	sgsn->gprs_ipa_client = talloc_zero(tall_bsc_ctx, struct gprs_ipa_client);
+	sgsn->gprs_ipa_client->ipac = talloc_zero(tall_bsc_ctx, struct ipa_client);
+	OSMO_ASSERT(sgsn->gprs_ipa_client && sgsn->gprs_ipa_client->ipac);
+
+	// simulate working connection.
+	ipa_client_conn_send_cb = my_ipa_client_conn_send;
+	sgsn->gprs_ipa_client->ipac->is_connected = 1;
+
+	struct gprs_ipa_client *gipac = sgsn->gprs_ipa_client;
+
+	struct gprs_oap_config *config = &sgsn->cfg.oap;
+	struct gprs_oap_state *state = &gipac->oap;
+
+	// make sure of clean slate
+	memset(state, 0, sizeof(*state));
+
+	config->sgsn_id = 12345;
+	config->shared_secret = "0102030405060708090a0b0c0d0e0f10";
+	OSMO_ASSERT(gprs_oap_init(config, state) == 0);
+
+	OSMO_ASSERT(gprs_oap_register(gipac) == 0);
+
+	// my_ipa_client_conn_send (wrapped) will have caught this registration
+	// request and sent the test reply to gprs_oap_rx, which has in turn
+	// sent the next response using my_ipa_client_conn_send, and again
+	// gprs_oap_rx has evaluated the final result, all of this before above
+	// gprs_oap_register() has exited. So just evaluate the results.
+
+	OSMO_ASSERT(state->state == oap_registered);
+	OSMO_ASSERT(state->challenges_count == 1);
+
+	ipa_client_conn_send_cb = __real_ipa_client_conn_send;
+
+	talloc_free(sgsn->gprs_ipa_client->ipac);
+	talloc_free(sgsn->gprs_ipa_client);
+	sgsn->gprs_ipa_client = NULL;
+}
+
 
 static struct log_info_cat gprs_categories[] = {
 	[DMM] = {
@@ -2029,7 +2351,6 @@ int main(int argc, char **argv)
 	tall_msgb_ctx = talloc_named_const(osmo_sgsn_ctx, 0, "msgb");
 
 	sgsn_auth_init();
-	gprs_subscr_init(sgsn);
 
 	test_llme();
 	test_subscriber();
@@ -2052,6 +2373,8 @@ int main(int argc, char **argv)
 	test_gmm_ptmsi_allocation();
 	test_apn_matching();
 	test_ggsn_selection();
+	test_oap();
+	test_sgsn_registration();
 	printf("Done\n");
 
 	talloc_report_full(osmo_sgsn_ctx, stderr);

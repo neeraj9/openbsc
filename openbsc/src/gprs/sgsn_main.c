@@ -51,6 +51,7 @@
 #include <openbsc/sgsn.h>
 #include <openbsc/gprs_llc.h>
 #include <openbsc/gprs_gmm.h>
+#include <openbsc/gprs_ipa_client.h>
 #include <osmocom/ctrl/control_if.h>
 #include <osmocom/ctrl/ports.h>
 
@@ -359,9 +360,9 @@ int main(int argc, char **argv)
 		exit(2);
 	}
 
-	rc = gprs_subscr_init(&sgsn_inst);
+	rc = gprs_ipa_client_init(&sgsn_inst);
 	if (rc < 0) {
-		LOGP(DGPRS, LOGL_FATAL, "Cannot set up subscriber management\n");
+		LOGP(DGPRS, LOGL_FATAL, "Cannot establish IPA connection\n");
 		exit(2);
 	}
 
