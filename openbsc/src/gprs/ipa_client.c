@@ -20,7 +20,7 @@
  *
  */
 
-#include <openbsc/gprs_gsup_client.h>
+#include <openbsc/ipa_client.h>
 
 #include <osmocom/abis/ipa.h>
 #include <osmocom/gsm/protocol/ipaccess.h>

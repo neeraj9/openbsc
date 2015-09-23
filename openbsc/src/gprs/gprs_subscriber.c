@@ -21,7 +21,7 @@
  */
 
 #include <openbsc/gsm_subscriber.h>
-#include <openbsc/gprs_gsup_client.h>
+#include <openbsc/ipa_client.h>
 
 #include <openbsc/sgsn.h>
 #include <openbsc/gprs_sgsn.h>

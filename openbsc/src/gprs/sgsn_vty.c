@@ -34,7 +34,7 @@
 #include <openbsc/gprs_sgsn.h>
 #include <openbsc/vty.h>
 #include <openbsc/gsm_04_08_gprs.h>
-#include <openbsc/gprs_gsup_client.h>
+#include <openbsc/ipa_client.h>
 
 #include <osmocom/vty/command.h>
 #include <osmocom/vty/vty.h>

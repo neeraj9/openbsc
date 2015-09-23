@@ -25,7 +25,7 @@
 #include <openbsc/debug.h>
 #include <openbsc/gsm_subscriber.h>
 #include <openbsc/gprs_gsup_messages.h>
-#include <openbsc/gprs_gsup_client.h>
+#include <openbsc/ipa_client.h>
 #include <openbsc/gprs_utils.h>
 
 #include <osmocom/gprs/gprs_bssgp.h>

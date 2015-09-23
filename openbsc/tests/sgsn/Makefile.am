@@ -24,7 +24,7 @@ sgsn_test_LDADD = \
 	$(top_builddir)/src/gprs/sgsn_auth.o \
 	$(top_builddir)/src/gprs/sgsn_ares.o \
 	$(top_builddir)/src/gprs/gprs_gsup_messages.o \
-	$(top_builddir)/src/gprs/gprs_gsup_client.o \
+	$(top_builddir)/src/gprs/ipa_client.o \
 	$(top_builddir)/src/gprs/gprs_utils.o \
 	$(top_builddir)/src/gprs/gprs_subscriber.o \
 	$(top_builddir)/src/gprs/gsm_04_08_gprs.o \
