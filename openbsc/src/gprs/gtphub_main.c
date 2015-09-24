@@ -21,9 +21,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <netdb.h>
 
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/udp.h>
 
 #define _GNU_SOURCE
 #include <getopt.h>
@@ -43,6 +46,49 @@ const char *gtphub_copyright =
 
 #define GTP_PORT 3386
 
+// TODO decide whether to move to libosmocore, and use in osmo_sock_init() to
+// remove dup.
+/*! \brief Initialize an addrinfo
+ *  \param[out] addr pointer to an addrinfo pointer to set to the result.
+ *  \param[in] family Address Family like AF_INET, AF_INET6, AF_UNSPEC
+ *  \param[in] type Socket type like SOCK_DGRAM, SOCK_STREAM
+ *  \param[in] proto Protocol like IPPROTO_TCP, IPPROTO_UDP
+ *  \param[in] host remote host name or IP address in string form
+ *  \param[in] port remote port number in host byte order
+ *  \returns 0 on success, otherwise an error code (from getaddrinfo()).
+ *
+ * Fill a struct addrinfo according to the given parameters. The user must call
+ * freeaddrinfo(addr) when done with addr.
+ */
+int osmo_addr_init(struct addrinfo **addr,
+		   uint16_t family, uint16_t type, uint8_t proto,
+		   const char *host, uint16_t port)
+{
+	struct addrinfo hints;
+	int rc;
+	char portbuf[16];
+
+	sprintf(portbuf, "%u", port);
+	memset(&hints, 0, sizeof(struct addrinfo));
+	hints.ai_family = family;
+	if (type == SOCK_RAW) {
+		/* Workaround for glibc, that returns EAI_SERVICE (-8) if
+		 * SOCK_RAW and IPPROTO_GRE is used.
+		 */
+		hints.ai_socktype = SOCK_DGRAM;
+		hints.ai_protocol = IPPROTO_UDP;
+	} else {
+		hints.ai_socktype = type;
+		hints.ai_protocol = proto;
+	}
+
+	rc = getaddrinfo(host, portbuf, &hints, addr);
+	if (rc != 0) {
+		perror("getaddrinfo returned NULL");
+		return -EINVAL;
+	}
+}
+
 int main(int argc, char **argv)
 {
 	int rc;
@@ -59,10 +105,11 @@ int main(int argc, char **argv)
 		exit(-1);
 	}
 
-	struct osmo_fd ofd_tx = {0};
-	rc = osmo_sock_init_ofd(&ofd_tx, AF_UNSPEC, SOCK_DGRAM, IPPROTO_UDP, to_addr_str, to_port, OSMO_SOCK_F_CONNECT);
-	if (rc < 1) {
-		fprintf(stderr, "Cannot resolve '%s port %d'\n", to_addr_str, to_port);
+	struct addrinfo *addr;
+
+	rc = osmo_addr_init(&addr, AF_UNSPEC, SOCK_DGRAM, IPPROTO_UDP, to_addr_str, to_port);
+	if (rc != 0) {
+		fprintf(stderr, "Cannot resolve '%s:%d'\n", to_addr_str, to_port);
 		exit(-1);
 	}
 
@@ -85,7 +132,7 @@ int main(int argc, char **argv)
 		}
 
 		printf("sending %d bytes to %s port %d ...\n", received, to_addr_str, to_port);
-		ssize_t sent = send(ofd_tx.fd, buf, received, 0);
+		ssize_t sent = sendto(ofd.fd, buf, received, 0, addr->ai_addr, addr->ai_addrlen);
 
 		if (sent == -1) {
 			fprintf(stderr, "error %s\n", strerror(errno));
@@ -97,6 +144,8 @@ int main(int argc, char **argv)
 		else
 			printf("ok\n");
 	}
+
+	freeaddrinfo(addr);
 
 	/* not reached */
 	exit(0);
