@@ -11,6 +11,7 @@ noinst_HEADERS = gprs_sndcp.h
 bin_PROGRAMS = osmo-gbproxy
 
 if HAVE_LIBGTP
+bin_PROGRAMS += osmo-gtphub
 if HAVE_LIBCARES
 bin_PROGRAMS += osmo-sgsn
 endif
@@ -32,3 +33,6 @@ osmo_sgsn_LDADD = 	\
 			$(top_builddir)/src/libcommon/libcommon.a \
 			-lgtp $(OSMO_LIBS) $(LIBOSMOABIS_LIBS) $(LIBCARES_LIBS) \
 			$(LIBCRYPTO_LIBS) -lrt
+
+osmo_gtphub_SOURCES =	gtphub_main.c
+osmo_gtphub_LDADD = 	$(LIBOSMOCORE_LIBS) -lrt

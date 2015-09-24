@@ -53,6 +53,7 @@ src/utils/isdnsync
 src/nat/bsc_nat
 src/gprs/osmo-sgsn
 src/gprs/osmo-gbproxy
+src/gprs/osmo-gtphub
 src/osmo-bsc_nat/osmo-bsc_nat
 
 #tests
