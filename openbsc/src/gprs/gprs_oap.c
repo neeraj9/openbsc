@@ -14,38 +14,17 @@ int gprs_oap_init(struct gprs_oap_config *config, struct gprs_oap_state *state)
 {
 	OSMO_ASSERT(state->state == oap_uninitialized);
 
-	if (config->sgsn_id == 0)
+	if ((config->sgsn_id == 0) || (config->shared_secret_present == 0))
 		goto disable;
-
-	if (!(config->shared_secret) || (strlen(config->shared_secret) == 0))
-		goto disable;
-
-	/* this should probably happen in config parsing place?? */
-	int secret_len = osmo_hexparse(config->shared_secret,
-				       state->shared_secret,
-				       sizeof(state->shared_secret));
-	if (secret_len < 0)
-		goto failure;
-
-	if (secret_len < 1)
-		goto disable;
-
-	/* zero pad to fill 16 octets */
-	for (; secret_len < 16; secret_len++) {
-		state->shared_secret[secret_len] = 0;
-	}
 
 	state->sgsn_id = config->sgsn_id;
+	memcpy(state->shared_secret, config->shared_secret, sizeof(state->shared_secret));
 	state->state = oap_initialized;
 	return 0;
 
 disable:
 	state->state = oap_disabled;
 	return 0;
-
-failure:
-	state->state = oap_config_error;
-	return -1;
 }
 
 
@@ -58,7 +37,6 @@ int gprs_oap_evaluate_challenge(struct gprs_oap_state *state,
 	switch(state->state) {
 	case oap_uninitialized:
 	case oap_disabled:
-	case oap_config_error:
 		return -1;
 	default:
 		break;

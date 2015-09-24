@@ -215,6 +215,15 @@ static int config_write_sgsn(struct vty *vty)
 	if (g_cfg->ipa_server_port)
 		vty_out(vty, " ipa remote-port %d%s",
 			g_cfg->ipa_server_port, VTY_NEWLINE);
+
+	if (g_cfg->oap.sgsn_id)
+		vty_out(vty, " sgsn id %d%s",
+			(int)g_cfg->oap.sgsn_id, VTY_NEWLINE);
+
+	if (g_cfg->oap.shared_secret)
+		vty_out(vty, " sgsn oap-secret %s%s",
+			g_cfg->oap.shared_secret, VTY_NEWLINE);
+
 	llist_for_each_entry(acl, &g_cfg->imsi_acl, list)
 		vty_out(vty, " imsi-acl add %s%s", acl->imsi, VTY_NEWLINE);
 
@@ -896,6 +905,65 @@ DEFUN(cfg_ipa_remote_port, cfg_ipa_remote_port_cmd,
 	return CMD_SUCCESS;
 }
 
+DEFUN(cfg_sgsn_id, cfg_sgsn_id_cmd,
+	"sgsn id <1-65535>",
+	"OAP Parameters\n"
+	"Set the SGSN ID used to register with an OAP server\n"
+	"If omitted or zero, OAP registration is disabled\n")
+{
+	int id = atoi(argv[0]);
+	g_cfg->oap.sgsn_id = (uint16_t)atoi(argv[0]);
+
+	if ((id < 1) || (id > 65535)) {
+		vty_out(vty, "%% sgsn id out of range <1..65535>: %d%s",
+			id, VTY_NEWLINE);
+		return CMD_WARNING;
+	}
+	return CMD_SUCCESS;
+}
+
+DEFUN(cfg_oap_secret, cfg_oap_secret_cmd,
+      "sgsn oap-secret SECRET",
+      "SECRET value (16 byte) in hex\n")
+{
+	g_cfg->oap.shared_secret_present = 0;
+
+	const char *secret_str = argv[0];
+
+	if (!(secret_str) || (strlen(secret_str) == 0))
+		goto disable;
+
+	int secret_len = osmo_hexparse(secret_str,
+				       g_cfg->oap.shared_secret,
+				       sizeof(g_cfg->oap.shared_secret));
+	if (secret_len < 0)
+		goto failure;
+
+	if (secret_len < 1)
+		goto disable;
+
+	/* zero pad to fill 16 octets */
+	for (; secret_len < 16; secret_len++) {
+		g_cfg->oap.shared_secret[secret_len] = 0;
+	}
+
+	g_cfg->oap.shared_secret_present = 1;
+	return CMD_SUCCESS;
+
+failure:
+	vty_out(vty, "%% invalid oap-secret value '%s'%s",
+		secret_str, VTY_NEWLINE);
+	return CMD_WARNING;
+
+disable:
+	if (g_cfg->oap.sgsn_id > 0) {
+		vty_out(vty, "%% SGSN ID set, but empty oap-secret value disables OAP.%s",
+			VTY_NEWLINE);
+		return CMD_WARNING;
+	}
+	return CMD_SUCCESS;
+}
+
 DEFUN(cfg_apn_name, cfg_apn_name_cmd,
 	"access-point-name NAME",
 	"Configure a global list of allowed APNs\n"
@@ -970,6 +1038,8 @@ int sgsn_vty_init(void)
 	install_element(SGSN_NODE, &cfg_auth_policy_cmd);
 	install_element(SGSN_NODE, &cfg_ipa_remote_ip_cmd);
 	install_element(SGSN_NODE, &cfg_ipa_remote_port_cmd);
+	install_element(SGSN_NODE, &cfg_sgsn_id_cmd);
+	install_element(SGSN_NODE, &cfg_oap_secret_cmd);
 	install_element(SGSN_NODE, &cfg_apn_ggsn_cmd);
 	install_element(SGSN_NODE, &cfg_apn_imsi_ggsn_cmd);
 	install_element(SGSN_NODE, &cfg_apn_name_cmd);

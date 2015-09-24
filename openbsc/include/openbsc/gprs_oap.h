@@ -34,14 +34,22 @@ struct msgb;
  * copied. Is this separation really necessary? */
 struct gprs_oap_config {
 	uint16_t sgsn_id;
-	const char *shared_secret;
+	int shared_secret_present;
+	uint8_t shared_secret[16];
 };
 
+/* The runtime state of the OAP client. sgsn_id and shared_secret are in fact
+ * duplicated from gprs_oap_config, so that a separate validation of the config
+ * data is possible, and so that the OAP API needs only a struct
+ * gprs_oap_state* for all data -- in the OAP rx/tx functions, a struct
+ * gprs_ipa_client* (which contains the gprs_oap_state), suffices to have
+ * access to all oap values.
+ * TODO: remove this duplication?
+ * */
 struct gprs_oap_state {
 	enum {
 		oap_uninitialized = 0,	// just allocated.
 		oap_disabled,		// disabled by config.
-		oap_config_error, // <-- TODO really?
 		oap_initialized,	// shared_secret valid.
 		oap_requested_challenge,
 		oap_sent_challenge_result,

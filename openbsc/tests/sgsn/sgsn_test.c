@@ -2010,7 +2010,7 @@ static void test_oap(void)
 
 	// invalid sgsn_id and shared secret
 	config->sgsn_id = 0;
-	config->shared_secret = NULL;
+	config->shared_secret_present = 0;
 	OSMO_ASSERT( gprs_oap_init(config, state) == 0 );
 	OSMO_ASSERT(state->state == oap_disabled);
 
@@ -2019,63 +2019,28 @@ static void test_oap(void)
 
 	// only sgsn_id is invalid
 	config->sgsn_id = 0;
-	config->shared_secret = "0102030405060708090a0b0c0d0e0f10";
+	OSMO_ASSERT(osmo_hexparse("0102030405060708090a0b0c0d0e0f10", config->shared_secret, 16) == 16);
+	config->shared_secret_present = 1;
 	OSMO_ASSERT( gprs_oap_init(config, state) == 0 );
 	OSMO_ASSERT(state->state == oap_disabled);
 
 	memset(state, 0, sizeof(*state));
 
-	// omitted shared_secret
+	// valid id, but omitted shared_secret
 	config->sgsn_id = 12345;
-	config->shared_secret = NULL;
+	config->shared_secret_present = 0;
 	OSMO_ASSERT( gprs_oap_init(config, state) == 0 );
 	OSMO_ASSERT(state->state == oap_disabled);
 
 	memset(state, 0, sizeof(*state));
-
-	// invalid hex chars in shared_secret config
-	config->sgsn_id = 12345;
-	config->shared_secret = "non-hex";
-	OSMO_ASSERT( gprs_oap_init(config, state) < 0 );
-	OSMO_ASSERT(state->state == oap_config_error);
-
-	memset(state, 0, sizeof(*state));
-
-	// shared secret too long (defined to be 16 octets)
-	config->sgsn_id = 12345;
-	config->shared_secret = "0102030405060708090a0b0c0d0e0f101112131415161718";
-	OSMO_ASSERT( gprs_oap_init(config, state) < 0 );
-	OSMO_ASSERT(state->state == oap_config_error);
-
-	memset(state, 0, sizeof(*state));
-
-	// odd number of hex chars
-	config->sgsn_id = 12345;
-	config->shared_secret = "01020304050607081";
-	OSMO_ASSERT( gprs_oap_init(config, state) < 0 );
-	OSMO_ASSERT(state->state == oap_config_error);
-
-	memset(state, 0, sizeof(*state));
-
-	// zero padding of shared secret (defined to be 16 octets)
-	config->sgsn_id = 12345;
-	config->shared_secret = "0102030405060708";
-	OSMO_ASSERT( gprs_oap_init(config, state) == 0 );
-	OSMO_ASSERT(state->state == oap_initialized);
-	OSMO_ASSERT(strcmp("01020304050607080000000000000000",
-			   osmo_hexdump_nospc(state->shared_secret, 16)) == 0);
-
-	memset(state, 0, sizeof(*state));
-
 
 
 	// mint configuration
 	config->sgsn_id = 12345;
-	config->shared_secret = "0102030405060708090a0b0c0d0e0f10";
+	//config->shared_secret is still "0102030405060708090a0b0c0d0e0f10" from above
+	config->shared_secret_present = 1;
 	OSMO_ASSERT( gprs_oap_init(config, state) == 0 );
 	OSMO_ASSERT(state->state == oap_initialized);
-	OSMO_ASSERT(strcmp(config->shared_secret,
-			   osmo_hexdump_nospc(state->shared_secret, 16)) == 0);
 
 	printf("  - AUTN failure\n");
 	uint8_t rx_random[16];
@@ -2112,10 +2077,6 @@ static void test_oap(void)
 						tx_sres, tx_kc)
 		    == -1);
 	state->state = oap_disabled;
-	OSMO_ASSERT(gprs_oap_evaluate_challenge(state, rx_random, rx_autn,
-						tx_sres, tx_kc)
-		    == -1);
-	state->state = oap_config_error;
 	OSMO_ASSERT(gprs_oap_evaluate_challenge(state, rx_random, rx_autn,
 						tx_sres, tx_kc)
 		    == -1);
@@ -2264,7 +2225,8 @@ static void test_sgsn_registration(void)
 	memset(state, 0, sizeof(*state));
 
 	config->sgsn_id = 12345;
-	config->shared_secret = "0102030405060708090a0b0c0d0e0f10";
+	OSMO_ASSERT(osmo_hexparse("0102030405060708090a0b0c0d0e0f10", config->shared_secret, 16) == 16);
+	config->shared_secret_present = 1;
 	OSMO_ASSERT(gprs_oap_init(config, state) == 0);
 
 	OSMO_ASSERT(gprs_oap_register(gipac) == 0);
