@@ -22,12 +22,16 @@
 #include <stdlib.h>
 #include <errno.h>
 
+#include <sys/socket.h>
+#include <netinet/in.h>
+
 #define _GNU_SOURCE
 #include <getopt.h>
 
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/udp.h>
+#include <osmocom/core/socket.h>
+#include <osmocom/core/select.h>
+
+#include <unistd.h>
 
 void *tall_bsc_ctx;
 
@@ -39,78 +43,54 @@ const char *gtphub_copyright =
 
 #define GTP_PORT 3386
 
-/* Bind to UDP port <port> on interface <ifname>. Return the open file
- * descriptor. */
-static int udp_sock(const char *ifname, uint16_t port)
-{
-	int fd, rc, bc = 1;
-	struct sockaddr_in sa;
-
-	fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-	if (fd < 0)
-		return fd;
-
-	if (ifname) {
-#ifdef __FreeBSD__
-		rc = setsockopt(fd, SOL_SOCKET, IP_RECVIF, ifname,
-				strlen(ifname));
-#else
-		rc = setsockopt(fd, SOL_SOCKET, SO_BINDTODEVICE, ifname,
-				strlen(ifname));
-#endif
-		if (rc < 0)
-			goto err;
-	}
-
-	memset(&sa, 0, sizeof(sa));
-	sa.sin_family = AF_INET;
-	sa.sin_port = htons(port);
-	sa.sin_addr.s_addr = INADDR_ANY;
-
-	rc = bind(fd, (struct sockaddr *)&sa, sizeof(sa));
-	if (rc < 0)
-		goto err;
-
-	return fd;
-
-err:
-	close(fd);
-	return rc;
-}
-
 int main(int argc, char **argv)
 {
 	int rc;
 	uint16_t in_port = GTP_PORT;
 
-	const char* to_addr_str = "127.0.0.1";
+	const char* to_addr_str = "localhost";
 	uint16_t to_port = 1234;
 
-	struct sockaddr_in to_sa;
-	to_sa.sin_family = AF_INET;
-	to_sa.sin_port = htons(to_port);
-	rc = inet_pton(AF_INET, to_addr_str, &to_sa.sin_addr);
-	if (rc != 1) {
-		fprintf(stderr, "Invalid IPv4 address: %s\n", to_addr_str);
+
+	struct osmo_fd ofd = {0};
+	rc = osmo_sock_init_ofd(&ofd, AF_UNSPEC, SOCK_DGRAM, IPPROTO_UDP, "localhost", in_port, OSMO_SOCK_F_BIND);
+	if (rc < 1) {
+		fprintf(stderr, "Cannot bind to port %d\n", in_port);
 		exit(-1);
 	}
 
-	int udp_fd = udp_sock(NULL, in_port);
+	struct osmo_fd ofd_tx = {0};
+	rc = osmo_sock_init_ofd(&ofd_tx, AF_UNSPEC, SOCK_DGRAM, IPPROTO_UDP, to_addr_str, to_port, OSMO_SOCK_F_CONNECT);
+	if (rc < 1) {
+		fprintf(stderr, "Cannot resolve '%s port %d'\n", to_addr_str, to_port);
+		exit(-1);
+	}
+
 
 	uint8_t buf[4096];
 
+	printf("receiving on port %d ...\n", in_port);
 	while (1) {
-		printf("receiving on port %d ...\n", in_port);
-		ssize_t received = recv(udp_fd, buf, sizeof(buf), 0);
 
-		if (! received)
-			continue;
+		errno = 0;
+		ssize_t received = recv(ofd.fd, buf, sizeof(buf), 0);
 
-		printf("sending %d bytes to %s:%d ...\n", received, to_addr_str, to_port);
-		ssize_t sent = sendto(udp_fd, buf, received, 0, (struct sockaddr*)&to_sa, sizeof(to_sa));
-
-		if (sent == -1)
+		if (received <= 0) {
+			if (errno == EAGAIN) {
+				usleep(1000);
+				continue;
+			}
 			fprintf(stderr, "error %s\n", strerror(errno));
+			exit(-1);
+		}
+
+		printf("sending %d bytes to %s port %d ...\n", received, to_addr_str, to_port);
+		ssize_t sent = send(ofd_tx.fd, buf, received, 0);
+
+		if (sent == -1) {
+			fprintf(stderr, "error %s\n", strerror(errno));
+			exit(-1);
+		}
 
 		if (sent != received)
 			fprintf(stderr, "sent(%d) != received(%d)\n", (int)sent, (int)received);
