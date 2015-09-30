@@ -28,45 +28,45 @@ struct sgsn_instance;
 struct gprs_ipa_client;
 struct msgb;
 
-/* This is the config part for vty. It is essentially copied in gprs_oap_state,
+/* This is the config part for vty. It is essentially copied in oap_state,
  * where values are copied over once the config is considered valid. The shared
  * secret is converted from hex string to octet buffer, the sgsn_id is simply
  * copied. Is this separation really necessary? */
-struct gprs_oap_config {
+struct oap_config {
 	uint16_t sgsn_id;
 	int shared_secret_present;
 	uint8_t shared_secret[16];
 };
 
 /* The runtime state of the OAP client. sgsn_id and shared_secret are in fact
- * duplicated from gprs_oap_config, so that a separate validation of the config
+ * duplicated from oap_config, so that a separate validation of the config
  * data is possible, and so that the OAP API needs only a struct
- * gprs_oap_state* for all data -- in the OAP rx/tx functions, a struct
- * gprs_ipa_client* (which contains the gprs_oap_state), suffices to have
+ * oap_state* for all data -- in the OAP rx/tx functions, a struct
+ * gprs_ipa_client* (which contains the oap_state), suffices to have
  * access to all oap values.
  * TODO: remove this duplication?
  * */
-struct gprs_oap_state {
+struct oap_state {
 	enum {
-		oap_uninitialized = 0,	// just allocated.
-		oap_disabled,		// disabled by config.
-		oap_initialized,	// shared_secret valid.
-		oap_requested_challenge,
-		oap_sent_challenge_result,
-		oap_registered
+		OAP_UNINITIALIZED = 0,	// just allocated.
+		OAP_DISABLED,		// disabled by config.
+		OAP_INITIALIZED,	// shared_secret valid.
+		OAP_REQUESTED_CHALLENGE,
+		OAP_SENT_CHALLENGE_RESULT,
+		OAP_REGISTERED
 	} state;
 	uint16_t sgsn_id;
 	uint8_t shared_secret[16];
 	int challenges_count;
 };
 
-int gprs_oap_init(struct gprs_oap_config *config, struct gprs_oap_state *state);
+int oap_init(struct oap_config *config, struct oap_state *state);
 
-int gprs_oap_evaluate_challenge(struct gprs_oap_state *state,
-				const uint8_t *rx_random,
-				const uint8_t *rx_autn,
-				uint8_t *tx_sres,
-				uint8_t *tx_kc);
+int oap_evaluate_challenge(struct oap_state *state,
+			   const uint8_t *rx_random,
+			   const uint8_t *rx_autn,
+			   uint8_t *tx_sres,
+			   uint8_t *tx_kc);
 
 int gprs_oap_register(struct gprs_ipa_client *gipac);
 int gprs_oap_rx(struct gprs_ipa_client *gipac, struct msgb *msg);

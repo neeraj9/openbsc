@@ -1,6 +1,6 @@
 /* Osmocom Authentication Protocol client */
 
-/* (C) 2015 by Sysmocom s.f.m.c. GmbH
+/* (C) 2014,2015 by Sysmocom s.f.m.c. GmbH
  * All Rights Reserved
  *
  * Authors: Jakob Erlbeck, Neels Hofmeyr

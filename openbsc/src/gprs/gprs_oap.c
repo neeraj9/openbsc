@@ -45,7 +45,7 @@ int gprs_oap_evaluate_challenge(struct gprs_oap_state *state,
 	struct osmo_auth_vector vec;
 
 	struct osmo_sub_auth_data auth = {
-		.type		= OSMO_AUTH_TYPE_GSM,
+		.type		= OSMO_AUTH_TYPE_UMTS,
 		.algo		= OSMO_AUTH_ALG_MILENAGE,
 	};
 
@@ -53,7 +53,6 @@ int gprs_oap_evaluate_challenge(struct gprs_oap_state *state,
 	OSMO_ASSERT(sizeof(auth.u.umts.k) == sizeof(state->shared_secret));
 
 	memcpy(auth.u.umts.opc, state->shared_secret, sizeof(auth.u.umts.opc));
-	memcpy(auth.u.umts.k, state->shared_secret, sizeof(auth.u.umts.k));
 	memcpy(auth.u.umts.k, state->shared_secret, sizeof(auth.u.umts.k));
 	memset(auth.u.umts.amf, 0, 2);
 	auth.u.umts.sqn = 42; // TODO?

@@ -27,7 +27,7 @@ Ideal communication sequence:
 
    Client                               Server
      |                                    |
-     |  Register (Id)                     |
+     |  Register (ID)                     |
      |----------------------------------->|
      |                                    |
      |  Challenge (RAND+AUTN)             |
@@ -43,7 +43,7 @@ Variation "test setup":
 
    Client                               Server
      |                                    |
-     |  Register (Id)                     |
+     |  Register (ID)                     |
      |----------------------------------->|
      |                                    |
      |  Register Result                   |
@@ -53,7 +53,7 @@ Variation "invalid sequence nr":
 
    Client                               Server
      |                                    |
-     |  Register (Id)                     |
+     |  Register (ID)                     |
      |----------------------------------->|
      |                                    |
      |  Challenge (RAND+AUTN)             |
@@ -131,7 +131,7 @@ Client -> Server
 
   IEI	Info Element		Type			Pres.	Format	Length
 	Message type		4.2.1			M	V	1
-  30	Client Id		big endian int (2 oct)	M	TLV	4
+  30	Client ID		big endian int (2 oct)	M	TLV	4
 
 3.2.2. Register Error
 
@@ -229,22 +229,22 @@ These are the standard values for the IEI.
   | 0x23   AUTN           octet string                      |
   | 0x24   XRES           octet string                      |
   | 0x25   AUTS           octet string                      |
-  | 0x30   Client Id      big endian int (2 octets)         |
+  | 0x30   Client ID      big endian int (2 octets)         |
   +---------------------------------------------------------+
 
-4.2.3. Client Id
+4.2.3. Client ID
 
      8      7      6      5      4      3      2      1
   +-----------------------------------------------------+
-  |     |  Client Id IEI                                | octet 1
+  |     |  Client ID IEI                                | octet 1
   +-----------------------------------------------------+
-  |   Length of Client Id IE contents (2)               | octet 2
+  |   Length of Client ID IE contents (2)               | octet 2
   +-----------------------------------------------------+
-  |   Client Id number, most significant byte           | octet 3
+  |   Client ID number, most significant byte           | octet 3
   +-----------------------------------------------------+
-  |   Client Id number, least significant byte          | octet 4
+  |   Client ID number, least significant byte          | octet 4
   +-----------------------------------------------------+
 
-The Client Id number shall be interpreted as an unsigned 16bit integer, where 0
-indicates an invalid / unset Id.
+The Client ID number shall be interpreted as an unsigned 16bit integer, where 0
+indicates an invalid / unset ID.
 

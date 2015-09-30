@@ -1,7 +1,7 @@
 /* General IPA client.
  * ipa_client is ping/pong connection checking on an ipa_client_conn. */
 
-/* (C) 2015 by Sysmocom s.f.m.c. GmbH
+/* (C) 2014,2015 by Sysmocom s.f.m.c. GmbH
  * All Rights Reserved
  *
  * Authors: Jacob Erlbeck, Neels Hofmeyr
