@@ -109,4 +109,8 @@ AT_KEYWORDS([gtphub])
 AT_CHECK([test "$enable_gtphub_test" != no || exit 77])
 cat $abs_srcdir/gtphub/gtphub_test.ok > expout
 AT_CHECK([$abs_top_builddir/tests/gtphub/gtphub_test], [], [expout], [ignore])
+cat $abs_srcdir/gtphub/gtphub_nc_test.ok > expout
+cat $abs_srcdir/gtphub/gtphub_nc_test.gtphub.conf > gtphub.conf
+ln -s $abs_top_builddir/src/gprs/osmo-gtphub .
+AT_CHECK([$abs_top_builddir/tests/gtphub/gtphub_nc_test.sh], [], [expout], [ignore])
 AT_CLEANUP

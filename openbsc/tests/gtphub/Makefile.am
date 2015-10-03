@@ -2,7 +2,9 @@ AM_CPPFLAGS = $(all_includes) -I$(top_srcdir)/include
 AM_CFLAGS=-Wall -ggdb3 $(LIBOSMOCORE_CFLAGS)
 
 EXTRA_DIST = \
-	gtphub_test.ok
+	gtphub_test.ok \
+	gtphub_nc_test.sh \
+	gtphub_nc_test.ok
 
 noinst_PROGRAMS = gtphub_test
 

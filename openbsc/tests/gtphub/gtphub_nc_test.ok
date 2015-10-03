@@ -1,0 +1,7 @@
+--- recv_server:
+(msg 1: m1 client to server)
+OK
+--- recv_client:
+(msg 2: s1 server to client)
+OK
+done

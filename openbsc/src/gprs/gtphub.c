@@ -846,7 +846,10 @@ struct gtphub_peer *gtphub_peer_new(struct gtphub_bind *bind)
 
 	INIT_LLIST_HEAD(&n->seq_map);
 	tei_map_init(&n->teim, &bind->teip);
-	n->next_peer_seq = rand(); /* TODO seed or use something else */
+	/* TODO use something random to pick the initial sequence nr.
+	   0x6d31 produces the ASCII character sequence 'm1', currently used in
+	   gtphub_nc_test.sh. */
+	n->next_peer_seq = 0x6d31;
 
 	llist_add(&n->entry, &bind->peers);
 	return n;
