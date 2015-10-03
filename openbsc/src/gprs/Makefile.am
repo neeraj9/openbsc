@@ -34,5 +34,5 @@ osmo_sgsn_LDADD = 	\
 			-lgtp $(OSMO_LIBS) $(LIBOSMOABIS_LIBS) $(LIBCARES_LIBS) \
 			$(LIBCRYPTO_LIBS) -lrt
 
-osmo_gtphub_SOURCES =	gtphub_main.c
+osmo_gtphub_SOURCES =	gtphub_main.c gtphub.c
 osmo_gtphub_LDADD = 	$(LIBOSMOCORE_LIBS) -lrt
