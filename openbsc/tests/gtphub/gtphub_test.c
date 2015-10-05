@@ -28,11 +28,65 @@
 
 #include <openbsc/debug.h>
 
+#include <openbsc/gtphub.h>
+
 void *osmo_gtphub_ctx;
 
-static void test_gtphub_api(void)
+/* TODO copied from libosmo-abis/src/subchan_demux.c, remove dup */
+static int llist_len(struct llist_head *head)
 {
-	OSMO_ASSERT(1);
+	struct llist_head *entry;
+	int i = 0;
+
+	llist_for_each(entry, head)
+		i++;
+
+	return i;
+}
+
+static void test_tei_map(void)
+{
+	/* Basic */
+	struct tei_pool _pool;
+	struct tei_pool *pool = &_pool;
+	struct tei_map _map;
+	struct tei_map *map = &_map;
+
+	tei_pool_init(pool);
+	tei_map_init(map, pool);
+
+	OSMO_ASSERT(llist_empty(&map->mappings));
+
+#define TEST_N 100
+#define TEST_I 123
+	uint32_t i, check_i;
+	uint32_t m[TEST_N];
+
+	/* create TEST_N mappings */
+	for (i = 0; i < TEST_N; i++) {
+		m[i] = tei_map_get(map, TEST_I + i);
+		OSMO_ASSERT(m[i] != 0);
+		OSMO_ASSERT(llist_len(&map->mappings) == (i+1));
+		for (check_i = 0; check_i < i; check_i++)
+			OSMO_ASSERT(m[check_i] != m[i]);
+	}
+	OSMO_ASSERT(llist_len(&map->mappings) == TEST_N);
+
+	/* verify mappings */
+	for (i = 0; i < TEST_N; i++) {
+		OSMO_ASSERT(tei_map_get(map, TEST_I + i) == m[i]);
+		OSMO_ASSERT(tei_map_get_rev(map, m[i]) == (TEST_I + i));
+	}
+	OSMO_ASSERT(llist_len(&map->mappings) == TEST_N);
+
+	/* remove all mappings */
+	for (i = 0; i < TEST_N; i++) {
+		tei_map_del(map, TEST_I + i);
+		OSMO_ASSERT(llist_len(&map->mappings) == (TEST_N - (i+1)));
+	}
+	OSMO_ASSERT(llist_empty(&map->mappings));
+#undef TEST_N
+#undef TEST_I
 }
 
 static struct log_info_cat gtphub_categories[] = {
@@ -54,7 +108,7 @@ int main(int argc, char **argv)
 	osmo_init_logging(&info);
 	osmo_gtphub_ctx = talloc_named_const(NULL, 0, "osmo_gtphub");
 
-	test_gtphub_api();
+	test_tei_map();
 	printf("Done\n");
 
 	talloc_report_full(osmo_gtphub_ctx, stderr);
