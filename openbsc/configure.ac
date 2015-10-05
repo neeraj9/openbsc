@@ -209,6 +209,7 @@ AC_OUTPUT(
     tests/trau/Makefile
     tests/sgsn/Makefile
     tests/subscr/Makefile
+    tests/gtphub/Makefile
     doc/Makefile
     doc/examples/Makefile
     Makefile)
