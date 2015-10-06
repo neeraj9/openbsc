@@ -200,6 +200,7 @@ int main(int argc, char **argv)
 		LOGERR("Cannot resolve '%s port %d'\n", ggsn_addr_str, ggsn_port);
 		exit(-1);
 	}
+	LOG("DEBUG: using GGSN %s port %d\n", ggsn_addr_str, ggsn_port);
 
 	log_cfg(cfg);
 

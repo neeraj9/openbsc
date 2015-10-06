@@ -107,6 +107,7 @@ void validate_gtp0_header(struct gtp_packet_desc *p)
 		return;
 	}
 
+	LOG("GTP v0 TID = %" PRIu64 "\n", pheader->tid);
 	p->header_len = GTP0_HEADER_SIZE;
 	p->rc = GTP_RC_PDU;
 }
@@ -128,6 +129,20 @@ void validate_gtp1_header(struct gtp_packet_desc *p)
 		p->rc = GTP_RC_TOOSHORT;
 		return;
 	}
+
+	LOG("|GTPv1\n");
+	LOG("| type = %" PRIu8 " 0x%02" PRIx8 "\n",
+	    pheader->type, pheader->type);
+	LOG("| length = %" PRIu16 " 0x%04" PRIx16 "\n",
+	    ntoh16(pheader->length), ntoh16(pheader->length));
+	LOG("| TEI = %" PRIu32 " 0x%08" PRIx32 "\n",
+	    ntoh32(pheader->tei), ntoh32(pheader->tei));
+	LOG("| seq = %" PRIu16 " 0x%04" PRIx16 "\n",
+	    ntoh16(pheader->seq), ntoh16(pheader->seq));
+	LOG("| npdu = %" PRIu8 " 0x%02" PRIx8 "\n",
+	    pheader->npdu, pheader->npdu);
+	LOG("| next = %" PRIu8 " 0x%02" PRIx8 "\n",
+	    pheader->next, pheader->next);
 
 	if (p->data_len <= GTP1_HEADER_SIZE_LONG) {
 		p->rc = GTP_RC_TINY;
@@ -366,6 +381,7 @@ static int gtp_relay(struct osmo_fd *from,
 	}
 
 	/* insert magic here */
+	LOG("Received %d\n%s\n", (int)received, osmo_hexdump(buf, received));
 
 	struct gtp_packet_desc p;
 	gtp_decode(buf, received, &p);
@@ -403,7 +419,7 @@ int from_ggsns_read_cb(struct osmo_fd *from_ggsns_ofd, unsigned int what)
 {
 	unsigned int port_idx = from_ggsns_ofd->priv_nr;
 	OSMO_ASSERT(port_idx < GTPH_PORT_N);
-	LOG("reading from GGSN (%s)\n", gtphub_port_idx_names[port_idx]);
+	LOG("\n\n=== reading from GGSN (%s)\n", gtphub_port_idx_names[port_idx]);
 	if (!(what & BSC_FD_READ))
 		return 0;
 
@@ -426,7 +442,7 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 {
 	unsigned int port_idx = from_sgsns_ofd->priv_nr;
 	OSMO_ASSERT(port_idx < GTPH_PORT_N);
-	LOG("reading from SGSN (%s)\n", gtphub_port_idx_names[port_idx]);
+	LOG("\n\n=== reading from SGSN (%s)\n", gtphub_port_idx_names[port_idx]);
 
 	if (!(what & BSC_FD_READ))
 		return 0;
