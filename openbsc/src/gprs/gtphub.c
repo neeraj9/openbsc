@@ -21,6 +21,7 @@
 
 #include <string.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <netinet/in.h>
 
 #include <openbsc/gtphub.h>
@@ -52,6 +53,82 @@ const char* const gtphub_port_idx_names[GTPH_PORT_N] = {
 	"CTRL",
 	"USER",
 };
+
+
+void tei_pool_init(struct tei_pool *pool)
+{
+	*pool = (struct tei_pool){};
+}
+
+uint32_t tei_pool_next(struct tei_pool *pool)
+{
+	pool->last_tei ++;
+
+	OSMO_ASSERT(pool->last_tei > 0);
+	/* TODO: gracefully handle running out of TEIs. */
+	/* TODO: random TEIs. */
+
+	return pool->last_tei;
+}
+
+void tei_map_init(struct tei_map *map, struct tei_pool *pool)
+{
+	*map = (struct tei_map){};
+	map->pool = pool;
+	INIT_LLIST_HEAD(&map->mappings);
+}
+
+static uint32_t tei_map_new(struct tei_map *map, uint32_t tei_orig)
+{
+	struct tei_mapping *mapping;
+	mapping = talloc_zero(osmo_gtphub_ctx, struct tei_mapping);
+	OSMO_ASSERT(mapping);
+	mapping->orig = tei_orig;
+	mapping->repl = tei_pool_next(map->pool);
+	llist_add(&mapping->entry, &map->mappings);
+	return mapping->repl;
+}
+
+uint32_t tei_map_get(struct tei_map *map, uint32_t tei_orig)
+{
+	OSMO_ASSERT(tei_orig != 0);
+
+	struct tei_mapping *mapping;
+	llist_for_each_entry(mapping, &map->mappings, entry) {
+		if (mapping->orig == tei_orig)
+			return mapping->repl;
+	}
+	/* Not found. */
+
+	return tei_map_new(map, tei_orig);
+}
+
+uint32_t tei_map_get_rev(struct tei_map *map, uint32_t tei_repl)
+{
+	OSMO_ASSERT(tei_repl != 0);
+
+	struct tei_mapping *pos;
+	llist_for_each_entry(pos, &map->mappings, entry) {
+		if (pos->repl == tei_repl) {
+			OSMO_ASSERT(pos->orig);
+			return pos->orig;
+		}
+	}
+	return 0;
+}
+
+void tei_map_del(struct tei_map *map, uint32_t tei_orig)
+{
+	struct tei_mapping *mapping;
+	llist_for_each_entry(mapping, &map->mappings, entry) {
+		if (mapping->orig == tei_orig) {
+			llist_del(&mapping->entry);
+			talloc_free(mapping);
+			return;
+		}
+	}
+	LOGERR("No mapping exists for TEI %" PRIu32 ".\n", tei_orig);
+}
 
 
 /* gtphub */
@@ -93,6 +170,7 @@ static int gtphub_gtp_bind_init(struct gtphub_bind *b,
 {
 	memset(b, '\0', sizeof(*b));
 
+	tei_pool_init(&b->teip);
 	INIT_LLIST_HEAD(&b->peers);
 
 	if (gtphub_sock_init(&b->ofd, &cfg->bind, cb, cb_data, ofd_id) != 0)
@@ -240,6 +318,9 @@ int gtphub_init(struct gtphub *hub, struct gtphub_cfg *cfg)
 struct gtphub_peer *gtphub_peer_new(struct gtphub_bind *bind)
 {
 	struct gtphub_peer *n = talloc_zero(osmo_gtphub_ctx, struct gtphub_peer);
+
+	tei_map_init(&n->teim, &bind->teip);
+
 	llist_add(&n->entry, &bind->peers);
 	return n;
 }
