@@ -24,6 +24,8 @@
 #include <inttypes.h>
 #include <netinet/in.h>
 
+#include <gtp.h>
+
 #include <openbsc/gtphub.h>
 #include <openbsc/debug.h>
 
@@ -46,6 +48,150 @@ typedef int (*osmo_fd_cb_t)(struct osmo_fd *fd, unsigned int what);
 #define __llist_first(head) (((head)->next == (head)) ? NULL : (head)->next)
 #define llist_first(head, type, entry) llist_entry(__llist_first(head), type, entry)
 
+/* TODO duplicated from openggsn/gtp/gtpie.h */
+#define ntoh16(x) ntohs(x)
+#define ntoh32(x) ntohl(x)
+
+/* TODO move GTP header stuff to openggsn/gtp/ ? See gtp_decaps*() */
+
+enum gtp_rc {
+	GTP_RC_UNKNOWN = 0,
+	GTP_RC_TINY = 1,    /* no IEs (like ping/pong) */
+	GTP_RC_PDU = 2,     /* a real packet with IEs */
+
+	GTP_RC_TOOSHORT = -1,
+	GTP_RC_UNSUPPORTED_VERSION = -2,
+	GTP_RC_INVALID_IE = -3,
+};
+
+struct gtp_packet_desc {
+	const union gtp_packet *data;
+	int data_len;
+	int header_len;
+	int version;
+	int rc;
+};
+
+/* Validate GTP version 0 data; analogous to validate_gtp1_header(), see there.
+ */
+void validate_gtp0_header(struct gtp_packet_desc *p)
+{
+	const struct gtp0_header *pheader = &(p->data->gtp0.h);
+	p->rc = GTP_RC_UNKNOWN;
+	p->header_len = 0;
+
+	OSMO_ASSERT(p->data_len >= 1);
+	OSMO_ASSERT(p->version == 0);
+
+	if (p->data_len < GTP0_HEADER_SIZE) {
+		LOGERR("GTP0 packet too short: %d\n", p->data_len);
+		p->rc = GTP_RC_TOOSHORT;
+		return;
+	}
+
+	if (p->data_len == GTP0_HEADER_SIZE) {
+		p->rc = GTP_RC_TINY;
+		p->header_len = GTP0_HEADER_SIZE;
+		return;
+	}
+
+	/* Check packet length field versus length of packet */
+	if (p->data_len != (ntoh16(pheader->length) + GTP0_HEADER_SIZE)) {
+		LOGERR("GTP packet length field (%d + %d) does not match"
+		       " actual length (%d)\n",
+		       GTP0_HEADER_SIZE, (int)ntoh16(pheader->length),
+		       p->data_len);
+		p->rc = GTP_RC_TOOSHORT;
+		return;
+	}
+
+	p->header_len = GTP0_HEADER_SIZE;
+	p->rc = GTP_RC_PDU;
+}
+
+/* Validate GTP version 1 data, and update p->rc with the result, as well as
+ * p->header_len in case of a valid header. */
+void validate_gtp1_header(struct gtp_packet_desc *p)
+{
+	const struct gtp1_header_long *pheader = &(p->data->gtp1l.h);
+	p->rc = GTP_RC_UNKNOWN;
+	p->header_len = 0;
+
+	OSMO_ASSERT(p->data_len >= 1);
+	OSMO_ASSERT(p->version == 1);
+
+	if ((p->data_len < GTP1_HEADER_SIZE_LONG)
+	    && (p->data_len != GTP1_HEADER_SIZE_SHORT)){
+		LOGERR("GTP packet too short: %d\n", p->data_len);
+		p->rc = GTP_RC_TOOSHORT;
+		return;
+	}
+
+	if (p->data_len <= GTP1_HEADER_SIZE_LONG) {
+		p->rc = GTP_RC_TINY;
+		p->header_len = GTP1_HEADER_SIZE_SHORT;
+		return;
+	}
+
+	/* Check packet length field versus length of packet */
+	if (p->data_len != (ntoh16(pheader->length) + GTP1_HEADER_SIZE_SHORT)) {
+		LOGERR("GTP packet length field (%d + %d) does not match"
+		       " actual length (%d)\n",
+		       GTP1_HEADER_SIZE_SHORT, (int)ntoh16(pheader->length),
+		       p->data_len);
+		p->rc = GTP_RC_TOOSHORT;
+		return;
+	}
+
+	p->rc = GTP_RC_PDU;
+	p->header_len = GTP1_HEADER_SIZE_LONG;
+}
+
+/* Examine whether p->data of size p->data_len has a valid GTP header. Set
+ * p->version, p->rc and p->header_len. On error, p->rc <= 0 (see enum
+ * gtp_rc). p->data must point at a buffer with p->data_len set. */
+void validate_gtp_header(struct gtp_packet_desc *p)
+{
+	p->rc = GTP_RC_UNKNOWN;
+
+	/* Need at least 1 byte in order to check version */
+	if (p->data_len < (1)) {
+		LOGERR("Discarding packet - too small\n");
+		p->rc = GTP_RC_TOOSHORT;
+		return;
+	}
+
+	p->version = p->data->flags >> 5;
+
+	switch (p->version) {
+	case 0:
+		validate_gtp0_header(p);
+		break;
+	case 1:
+		validate_gtp1_header(p);
+		break;
+	default:
+		LOGERR("Unsupported GTP version: %d\n", p->version);
+		p->rc = GTP_RC_UNSUPPORTED_VERSION;
+		break;
+	}
+}
+
+/* Validate header, and index information elements. Write decoded packet
+ * information to *res. res->data will point at the given data buffer. On
+ * error, p->rc is set <= 0 (see enum gtp_rc). */
+static void gtp_decode(const uint8_t *data, int data_len, struct gtp_packet_desc *res)
+{
+	memset(res, '\0', sizeof(*res));
+	res->data = (union gtp_packet*)data;
+	res->data_len = data_len;
+
+	validate_gtp_header(res);
+
+	if (res->rc == GTP_RC_TINY)
+		LOG("tiny: no IEs in this GTP packet\n");
+}
+
 
 /* general */
 
@@ -54,6 +200,8 @@ const char* const gtphub_port_idx_names[GTPH_PORT_N] = {
 	"USER",
 };
 
+
+/* tei_map, tei_pool */
 
 void tei_pool_init(struct tei_pool *pool)
 {
@@ -216,6 +364,17 @@ static int gtp_relay(struct osmo_fd *from,
 	}
 
 	/* insert magic here */
+
+	struct gtp_packet_desc p;
+	gtp_decode(buf, received, &p);
+
+	if (p.rc > 0)
+		LOG("Valid GTP header (v%d)\n", p.version);
+#if 0
+	else
+		// error has been logged
+		return 0;
+#endif
 
 	errno = 0;
 	ssize_t sent = sendto(to->fd, buf, received, 0,
