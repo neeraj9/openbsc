@@ -20,27 +20,17 @@
  */
 
 #include <string.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <errno.h>
-
-#include <sys/socket.h>
-#include <netinet/in.h>
 
 #define _GNU_SOURCE
 #include <getopt.h>
 
 #include <osmocom/core/application.h>
-#include <osmocom/core/utils.h>
-#include <osmocom/core/socket.h>
-#include <osmocom/core/select.h>
 #include <osmocom/core/logging.h>
+#include <osmocom/core/utils.h>
 
 #include <openbsc/debug.h>
-
-#include <gtp.h>
-
-#include <unistd.h>
+#include <openbsc/gtphub.h>
 
 #define LOGERR(fmt, args...) \
 	LOGP(DGTPHUB, LOGL_ERROR, fmt, ##args)
@@ -113,7 +103,6 @@ int osmo_sockaddr_init(struct sockaddr_storage *addr, socklen_t *addr_len,
 }
 
 
-void *tall_bsc_ctx;
 
 const char *gtphub_copyright =
 	"Copyright (C) 2015 sysmocom s.m.f.c GmbH <info@sysmocom.de>\r\n"
@@ -142,139 +131,77 @@ static const struct log_info gtphub_log_info = {
 	.num_cat = ARRAY_SIZE(gtphub_categories),
 };
 
-/* Recv datagram from from->fd, optionally write sender's address to *from_addr
- * and *from_addr_len, parse datagram as GTP, and forward on to to->fd using
- * *to_addr. to_addr may be NULL, if an address is set on to->fd. */
-int gtp_relay(struct osmo_fd *from, struct sockaddr_storage *from_addr, socklen_t *from_addr_len,
-	      struct osmo_fd *to, struct sockaddr_storage *to_addr, socklen_t to_addr_len)
+void log_cfg(struct gtphub_cfg *cfg)
 {
-	static uint8_t buf[4096];
-
-	errno = 0;
-	ssize_t received = recvfrom(from->fd, buf, sizeof(buf), 0,
-				    (struct sockaddr*)from_addr, from_addr_len);
-
-	if (received <= 0) {
-		if (errno != EAGAIN)
-			LOGERR("error: %s\n", strerror(errno));
-		return -errno;
-	}
-
-	if (from_addr) {
-		LOG("from %s\n", osmo_hexdump((uint8_t*)from_addr, *from_addr_len));
-	}
-
-	if (received <= 0) {
-		LOGERR("error: %s\n", strerror(errno));
-		return -EINVAL;
-	}
-
-	/* insert magic here */
-
-	errno = 0;
-	ssize_t sent = sendto(to->fd, buf, received, 0,
-			      (struct sockaddr*)to_addr, to_addr_len);
-
-	if (to_addr) {
-		LOG("to %s\n", osmo_hexdump((uint8_t*)to_addr, to_addr_len));
-	}
-
-	if (sent == -1) {
-		LOGERR("error: %s\n", strerror(errno));
-		return -EINVAL;
-	}
-
-	if (sent != received)
-		LOGERR("sent(%d) != received(%d)\n", (int)sent, (int)received);
-	else
-		LOG("%d b ok\n", (int)sent);
-
-	return 0;
-}
-
-struct sockaddr_storage last_client_addr;
-socklen_t last_client_addr_len;
-struct sockaddr_storage server_addr;
-socklen_t server_addr_len;
-
-int clients_read_cb(struct osmo_fd *clients_ofd, unsigned int what)
-{
-	LOG("reading from clients socket\n");
-	struct osmo_fd *server_ofd = clients_ofd->data;
-
-	if (!(what & BSC_FD_READ))
-		return 0;
-
-	last_client_addr_len = sizeof(last_client_addr);
-	return gtp_relay(clients_ofd, &last_client_addr, &last_client_addr_len,
-			 server_ofd, &server_addr, server_addr_len);
-}
-
-int server_read_cb(struct osmo_fd *server_ofd, unsigned int what)
-{
-	LOG("reading from server socket\n");
-	struct osmo_fd *clients_ofd = server_ofd->data;
-
-	if (!(what & BSC_FD_READ))
-		return 0;
-
-	return gtp_relay(server_ofd, NULL, NULL,
-			 clients_ofd, &last_client_addr, last_client_addr_len);
+	struct gtphub_cfg_addr *a;
+	a = &cfg->to_sgsns[GTPH_PORT_CONTROL].bind;
+	LOG("to-SGSNs bind, Control: %s port %d\n",
+	    a->addr_str, a->port);
+	a = &cfg->to_sgsns[GTPH_PORT_USER].bind;
+	LOG("to-SGSNs bind, User:    %s port %d\n",
+	    a->addr_str, a->port);
+	a = &cfg->to_ggsns[GTPH_PORT_CONTROL].bind;
+	LOG("to-GGSNs bind, Control: %s port %d\n",
+	    a->addr_str, a->port);
+	a = &cfg->to_ggsns[GTPH_PORT_USER].bind;
+	LOG("to-GGSNs bind, User:    %s port %d\n",
+	    a->addr_str, a->port);
 }
 
 int main(int argc, char **argv)
 {
+	osmo_gtphub_ctx = talloc_named_const(NULL, 0, "osmo_gtphub");
+
 	osmo_init_logging(&gtphub_log_info);
 
 	int rc;
 
-	const char* clients_addr_str = "localhost";
-	uint16_t clients_port = 3386;
+	struct gtphub_cfg _cfg = {
+	.to_sgsns = {
+		{ .bind = {
+				.addr_str = "127.0.0.3",
+				.port = 2123,
+			  } },
+		{ .bind = {
+				.addr_str = "127.0.0.3",
+				.port = 2152,
+			  } },
+	},
+	.to_ggsns = {
+		{ .bind = {
+				.addr_str = "127.0.0.4",
+				.port = 2123,
+			  } },
+		{ .bind = {
+				.addr_str = "127.0.0.4",
+				.port = 2152,
+			  } },
+	},
+	};
 
-	const char* server_addr_str = "localhost";
-	uint16_t server_port = 1234;
+	struct gtphub_cfg *cfg = &_cfg;
 
-	/* Which local interface to use to listen for the GTP server's
-	 * responses */
-	const char* server_rx_addr_str = "localhost";
-	uint16_t server_rx_port = 4321;
+	struct gtphub _hub;
+	struct gtphub *hub = &_hub;
 
-	rc = osmo_sockaddr_init(&server_addr, &server_addr_len,
-				AF_UNSPEC, SOCK_DGRAM, IPPROTO_UDP, server_addr_str, server_port);
+	if (gtphub_init(hub, cfg) != 0)
+		return -1;
+
+	/* TODO this will not be configured, gtphub will have to find the
+	 * ggsns from incoming GTP PDUs. */
+	/* Where the GTP ggsn sits that we're relaying for */
+	const char* ggsn_addr_str = "127.0.0.2";
+	uint16_t ggsn_port = 2123;
+	struct gtphub_peer *test_ggsn = gtphub_peer_new(&hub->to_ggsns[GTPH_PORT_CONTROL]);
+	rc = osmo_sockaddr_init(&test_ggsn->addr.a, &test_ggsn->addr.l,
+				AF_UNSPEC, SOCK_DGRAM, IPPROTO_UDP,
+				ggsn_addr_str, ggsn_port);
 	if (rc != 0) {
-		LOGERR("Cannot resolve '%s port %d'\n", server_addr_str, server_port);
+		LOGERR("Cannot resolve '%s port %d'\n", ggsn_addr_str, ggsn_port);
 		exit(-1);
 	}
 
-	struct osmo_fd clients_ofd;
-	struct osmo_fd server_ofd;
-
-	memset(&clients_ofd, 0, sizeof(clients_ofd));
-	clients_ofd.when = BSC_FD_READ;
-	clients_ofd.cb = clients_read_cb;
-	clients_ofd.data = &server_ofd;
-
-	rc = osmo_sock_init_ofd(&clients_ofd, AF_UNSPEC, SOCK_DGRAM, IPPROTO_UDP, clients_addr_str, clients_port, OSMO_SOCK_F_BIND);
-	if (rc < 1) {
-		LOGERR("Cannot bind to %s port %d\n", clients_addr_str, clients_port);
-		exit(-1);
-	}
-
-	memset(&server_ofd, 0, sizeof(server_ofd));
-	server_ofd.when = BSC_FD_READ;
-	server_ofd.cb = server_read_cb;
-	server_ofd.data = &clients_ofd;
-
-	rc = osmo_sock_init_ofd(&server_ofd, AF_UNSPEC, SOCK_DGRAM, IPPROTO_UDP, server_rx_addr_str, server_rx_port, OSMO_SOCK_F_BIND);
-	if (rc < 1) {
-		LOGERR("Cannot bind to %s port %d\n", server_rx_addr_str, server_rx_port);
-		exit(-1);
-	}
-
-	LOG("GTP server connection: %s port %d <--> %s port %d\n",
-	    server_rx_addr_str, (int)server_rx_port,
-	    server_addr_str, (int)server_port);
-	LOG("Listening for clients on %s port %d.\n", clients_addr_str, clients_port);
+	log_cfg(cfg);
 
 	int daemonize = 0;
 
