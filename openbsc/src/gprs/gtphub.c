@@ -119,6 +119,8 @@ static int gtp_relay(struct osmo_fd *from,
 	errno = 0;
 	ssize_t received = recvfrom(from->fd, buf, sizeof(buf), 0,
 				    (struct sockaddr*)from_addr, from_addr_len);
+	/* TODO use recvmsg and get a MSG_TRUNC flag to make sure the message
+	 * is not truncated. Then maybe reduce buf's size. */
 
 	if (received <= 0) {
 		if (errno != EAGAIN)
