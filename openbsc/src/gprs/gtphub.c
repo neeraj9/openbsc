@@ -41,6 +41,8 @@ void *osmo_gtphub_ctx;
 #define LOG(fmt, args...) \
 	LOGP(DGTPHUB, LOGL_NOTICE, fmt, ##args)
 
+#define ZERO_STRUCT(struct_pointer) memset(struct_pointer, '\0', sizeof(*(struct_pointer)))
+
 /* TODO move this to osmocom/core/select.h ? */
 typedef int (*osmo_fd_cb_t)(struct osmo_fd *fd, unsigned int what);
 
@@ -182,7 +184,7 @@ void validate_gtp_header(struct gtp_packet_desc *p)
  * error, p->rc is set <= 0 (see enum gtp_rc). */
 static void gtp_decode(const uint8_t *data, int data_len, struct gtp_packet_desc *res)
 {
-	memset(res, '\0', sizeof(*res));
+	ZERO_STRUCT(res);
 	res->data = (union gtp_packet*)data;
 	res->data_len = data_len;
 
@@ -221,7 +223,7 @@ uint32_t tei_pool_next(struct tei_pool *pool)
 
 void tei_map_init(struct tei_map *map, struct tei_pool *pool)
 {
-	*map = (struct tei_map){};
+	ZERO_STRUCT(map);
 	map->pool = pool;
 	INIT_LLIST_HEAD(&map->mappings);
 }
@@ -283,7 +285,7 @@ void tei_map_del(struct tei_map *map, uint32_t tei_orig)
 
 void gtphub_zero(struct gtphub *hub)
 {
-	memset(hub, '\0', sizeof(*hub));
+	ZERO_STRUCT(hub);
 }
 
 static int gtphub_sock_init(struct osmo_fd *ofd,
@@ -316,7 +318,7 @@ static int gtphub_gtp_bind_init(struct gtphub_bind *b,
 				osmo_fd_cb_t cb, void *cb_data,
 				unsigned int ofd_id)
 {
-	memset(b, '\0', sizeof(*b));
+	ZERO_STRUCT(b);
 
 	tei_pool_init(&b->teip);
 	INIT_LLIST_HEAD(&b->peers);
