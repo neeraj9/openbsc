@@ -23,6 +23,7 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include <gtp.h>
 
@@ -32,6 +33,8 @@
 #include <osmocom/core/utils.h>
 #include <osmocom/core/logging.h>
 #include <osmocom/core/socket.h>
+
+#define GTPHUB_DEBUG 1
 
 void *osmo_gtphub_ctx;
 
@@ -54,6 +57,23 @@ typedef int (*osmo_fd_cb_t)(struct osmo_fd *fd, unsigned int what);
 #define ntoh16(x) ntohs(x)
 #define ntoh32(x) ntohl(x)
 
+/* cheat to use gtpie.h API.
+ * TODO publish gtpie.h upon openggsn installation */
+union gtpie_member;
+extern int gtpie_decaps(union gtpie_member *ie[], int version,
+			void *pack, unsigned len);
+extern int gtpie_gettv0(union gtpie_member *ie[], int type, int instance,
+			void *dst, unsigned int size);
+extern int gtpie_gettv1(union gtpie_member *ie[], int type, int instance,
+			uint8_t *dst);
+extern int gtpie_gettlv(union gtpie_member *ie[], int type, int instance,
+			unsigned int *length, void *dst, unsigned int size);
+#define GTPIE_IMSI            2	/* International Mobile Subscriber Identity 8 */
+#define GTPIE_NSAPI          20	/* NSAPI 1 */
+#define GTPIE_GSN_ADDR      133	/* GSN Address */
+#define GTPIE_SIZE 256
+/* end of things needed from gtpie.h */
+
 /* TODO move GTP header stuff to openggsn/gtp/ ? See gtp_decaps*() */
 
 enum gtp_rc {
@@ -72,6 +92,7 @@ struct gtp_packet_desc {
 	int header_len;
 	int version;
 	int rc;
+	union gtpie_member *ie[GTPIE_SIZE];
 };
 
 /* Validate GTP version 0 data; analogous to validate_gtp1_header(), see there.
@@ -194,6 +215,45 @@ void validate_gtp_header(struct gtp_packet_desc *p)
 	}
 }
 
+
+/* Return the value of the i'th IMSI IEI by copying to *imsi.
+ * The first IEI is reached by passing i = 0.
+ * imsi must point at allocated space of (at least) 8 bytes.
+ * Return 1 on success, or 0 if not found. */
+static int get_ie_imsi(union gtpie_member *ie[], uint8_t *imsi, int i)
+{
+	return gtpie_gettv0(ie, GTPIE_IMSI, i, imsi, 8) == 0;
+}
+
+/* Analogous to get_ie_imsi(). nsapi must point at a single uint8_t. */
+static int get_ie_nsapi(union gtpie_member *ie[], uint8_t *nsapi, int i)
+{
+	return gtpie_gettv1(ie, GTPIE_NSAPI, i, nsapi) == 0;
+}
+
+static char imsi_digit_to_char(uint8_t nibble)
+{
+	nibble &= 0x0f;
+	if (nibble > 9)
+		return (nibble == 0x0f) ? '\0' : '?';
+	return '0' + nibble;
+}
+
+/* Return a human readable IMSI string, in a static buffer.
+ * imsi must point at 8 octets of IMSI IE encoded IMSI data. */
+static const char *imsi_to_str(uint8_t *imsi)
+{
+	static char str[17];
+	int i;
+
+	for (i = 0; i < 8; i++) {
+		str[2*i] = imsi_digit_to_char(imsi[i]);
+		str[2*i + 1] = imsi_digit_to_char(imsi[i] >> 4);
+	}
+	str[16] = '\0';
+	return str;
+}
+
 /* Validate header, and index information elements. Write decoded packet
  * information to *res. res->data will point at the given data buffer. On
  * error, p->rc is set <= 0 (see enum gtp_rc). */
@@ -207,6 +267,43 @@ static void gtp_decode(const uint8_t *data, int data_len, struct gtp_packet_desc
 
 	if (res->rc == GTP_RC_TINY)
 		LOG("tiny: no IEs in this GTP packet\n");
+
+	if (res->rc != GTP_RC_PDU)
+		return;
+
+	if (gtpie_decaps(res->ie, res->version,
+			 (void*)(data + res->header_len),
+			 res->data_len - res->header_len) != 0) {
+		res->rc = GTP_RC_INVALID_IE;
+		return;
+	}
+
+#if GTPHUB_DEBUG
+	int i;
+
+	for (i = 0; i < 10; i++) {
+		uint8_t imsi[8];
+		if (!get_ie_imsi(res->ie, imsi, i))
+			break;
+		LOG("- IMSI %s\n", imsi_to_str(imsi));
+	}
+
+	for (i = 0; i < 10; i++) {
+		uint8_t nsapi;
+		if (!get_ie_nsapi(res->ie, &nsapi, i))
+			break;
+		LOG("- NSAPI %d\n", (int)nsapi);
+	}
+
+	for (i = 0; i < 10; i++) {
+		unsigned int addr_len;
+		struct in_addr addr;
+		if (gtpie_gettlv(res->ie, GTPIE_GSN_ADDR, i, &addr_len, &addr,
+				 sizeof(addr)) != 0)
+			break;
+		LOG("- addr %s\n", inet_ntoa(addr));
+	}
+#endif
 }
 
 
