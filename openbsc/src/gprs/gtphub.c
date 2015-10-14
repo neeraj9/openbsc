@@ -265,6 +265,9 @@ static void gtp_decode(const uint8_t *data, int data_len, struct gtp_packet_desc
 
 	validate_gtp_header(res);
 
+	if (res->rc > 0)
+		LOG("Valid GTP header (v%d)\n", res->version);
+
 	if (res->rc == GTP_RC_TINY)
 		LOG("tiny: no IEs in this GTP packet\n");
 
@@ -441,23 +444,20 @@ static int gtphub_gtp_bind_init(struct gtphub_bind *b,
 }
 
 /* Recv datagram from from->fd, optionally write sender's address to *from_addr
- * and *from_addr_len, parse datagram as GTP, and forward on to to->fd using
- * *to_addr. to_addr may be NULL, if an address is set on to->fd. */
-static int gtp_relay(struct osmo_fd *from,
-		     struct sockaddr_storage *from_addr,
-		     socklen_t *from_addr_len,
-		     struct osmo_fd *to,
-		     struct sockaddr_storage *to_addr,
-		     socklen_t to_addr_len)
+ * and *from_addr_len. Return the number of bytes read. */
+/* Send datagram to to->fd using *to_addr. to_addr may be NULL, if an address
+ * is set on to->fd. */
+static int gtphub_read(struct osmo_fd *from,
+		       struct sockaddr_storage *from_addr,
+		       socklen_t *from_addr_len,
+		       uint8_t *buf, size_t buf_len)
 {
-	static uint8_t buf[4096];
-
 	/* recvfrom requires the available length to be set in *from_addr_len. */
 	if (from_addr_len && from_addr)
 		*from_addr_len = sizeof(*from_addr);
 
 	errno = 0;
-	ssize_t received = recvfrom(from->fd, buf, sizeof(buf), 0,
+	ssize_t received = recvfrom(from->fd, buf, buf_len, 0,
 				    (struct sockaddr*)from_addr, from_addr_len);
 	/* TODO use recvmsg and get a MSG_TRUNC flag to make sure the message
 	 * is not truncated. Then maybe reduce buf's size. */
@@ -465,7 +465,7 @@ static int gtp_relay(struct osmo_fd *from,
 	if (received <= 0) {
 		if (errno != EAGAIN)
 			LOGERR("error: %s\n", strerror(errno));
-		return -errno;
+		return 0;
 	}
 
 	if (from_addr) {
@@ -474,25 +474,20 @@ static int gtp_relay(struct osmo_fd *from,
 
 	if (received <= 0) {
 		LOGERR("error: %s\n", strerror(errno));
-		return -EINVAL;
+		return 0;
 	}
 
-	/* insert magic here */
 	LOG("Received %d\n%s\n", (int)received, osmo_hexdump(buf, received));
+	return received;
+}
 
-	struct gtp_packet_desc p;
-	gtp_decode(buf, received, &p);
-
-	if (p.rc > 0)
-		LOG("Valid GTP header (v%d)\n", p.version);
-#if 0
-	else
-		// error has been logged
-		return 0;
-#endif
-
+static int gtphub_write(struct osmo_fd *to,
+			struct sockaddr_storage *to_addr,
+			socklen_t to_addr_len,
+			uint8_t *buf, size_t buf_len)
+{
 	errno = 0;
-	ssize_t sent = sendto(to->fd, buf, received, 0,
+	ssize_t sent = sendto(to->fd, buf, buf_len, 0,
 			      (struct sockaddr*)to_addr, to_addr_len);
 
 	if (to_addr) {
@@ -504,8 +499,8 @@ static int gtp_relay(struct osmo_fd *from,
 		return -EINVAL;
 	}
 
-	if (sent != received)
-		LOGERR("sent(%d) != received(%d)\n", (int)sent, (int)received);
+	if (sent != buf_len)
+		LOGERR("sent(%d) != data_len(%d)\n", (int)sent, (int)buf_len);
 	else
 		LOG("%d b ok\n", (int)sent);
 
@@ -530,9 +525,23 @@ int from_ggsns_read_cb(struct osmo_fd *from_ggsns_ofd, unsigned int what)
 		return 0;
 	}
 
-	return gtp_relay(from_ggsns_ofd, NULL, NULL,
-			 &hub->to_sgsns[port_idx].ofd,
-			 &sgsn->addr.a, sgsn->addr.l);
+	static uint8_t buf[4096];
+	size_t received = gtphub_read(from_ggsns_ofd, NULL, NULL,
+				      buf, sizeof(buf));
+	if (received < 1)
+		return 0;
+
+	static struct gtp_packet_desc p;
+	gtp_decode(buf, received, &p);
+
+#if 0
+	if (p.rc <= 0)
+		return 0;
+#endif
+
+	return gtphub_write(&hub->to_sgsns[port_idx].ofd,
+			    &sgsn->addr.a, sgsn->addr.l,
+			    (uint8_t*)p.data, p.data_len);
 }
 
 int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
@@ -560,9 +569,23 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 	if (!sgsn)
 		sgsn = gtphub_peer_new(&hub->to_sgsns[port_idx]);
 
-	return gtp_relay(from_sgsns_ofd, &sgsn->addr.a, &sgsn->addr.l,
-			 &hub->to_ggsns[port_idx].ofd,
-			 &ggsn->addr.a, ggsn->addr.l);
+	static uint8_t buf[4096];
+	size_t received = gtphub_read(from_sgsns_ofd, &sgsn->addr.a, &sgsn->addr.l,
+				      buf, sizeof(buf));
+	if (received < 1)
+		return 0;
+
+	static struct gtp_packet_desc p;
+	gtp_decode(buf, received, &p);
+
+#if 0
+	if (p.rc <= 0)
+		return 0;
+#endif
+
+	return gtphub_write(&hub->to_ggsns[port_idx].ofd,
+			    &ggsn->addr.a, ggsn->addr.l,
+			    (uint8_t*)p.data, p.data_len);
 }
 
 int gtphub_init(struct gtphub *hub, struct gtphub_cfg *cfg)
