@@ -22,6 +22,7 @@
 #include <string.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
@@ -35,6 +36,7 @@
 #include <osmocom/core/socket.h>
 
 #define GTPHUB_DEBUG 1
+#define MAP_SEQ 1
 
 void *osmo_gtphub_ctx;
 
@@ -56,6 +58,8 @@ typedef int (*osmo_fd_cb_t)(struct osmo_fd *fd, unsigned int what);
 /* TODO duplicated from openggsn/gtp/gtpie.h */
 #define ntoh16(x) ntohs(x)
 #define ntoh32(x) ntohl(x)
+
+#define hton16(x) htons(x)
 
 /* cheat to use gtpie.h API.
  * TODO publish gtpie.h upon openggsn installation */
@@ -87,7 +91,7 @@ enum gtp_rc {
 };
 
 struct gtp_packet_desc {
-	const union gtp_packet *data;
+	union gtp_packet *data;
 	int data_len;
 	int header_len;
 	int version;
@@ -481,6 +485,63 @@ static int gtphub_read(struct osmo_fd *from,
 	return received;
 }
 
+#if MAP_SEQ
+
+inline uint16_t get_seq(struct gtp_packet_desc *p)
+{
+	OSMO_ASSERT(p->version == 1);
+	return ntoh16(p->data->gtp1l.h.seq);
+}
+
+inline void set_seq(struct gtp_packet_desc *p, uint16_t seq)
+{
+	OSMO_ASSERT(p->version == 1);
+	p->data->gtp1l.h.seq = hton16(seq);
+}
+
+static int gtphub_map_seq(struct gtp_packet_desc *p,
+			  struct gtphub_peer *from_peer, struct gtphub_peer *to_peer)
+{
+
+	struct gtphub_seq_mapping *m = talloc_zero(osmo_gtphub_ctx, struct gtphub_seq_mapping);
+	OSMO_ASSERT(m);
+
+	m->peer_seq = to_peer->next_peer_seq++;
+	m->from = from_peer;
+	m->from_seq = get_seq(p);
+	LOG("  MAP %d --> %d\n", (int)m->from_seq, (int)m->peer_seq);
+
+	llist_add(&m->entry, &to_peer->seq_map);
+	set_seq(p, m->peer_seq);
+
+	return 0;
+}
+
+static struct gtphub_peer *gtphub_unmap_seq(struct gtp_packet_desc *p,
+					    struct gtphub_peer *from_peer)
+{
+	OSMO_ASSERT(p->version == 1);
+
+	uint16_t from_seq = get_seq(p);
+
+	struct gtphub_seq_mapping *mapping;
+	llist_for_each_entry(mapping, &from_peer->seq_map, entry) {
+		if (mapping->peer_seq == from_seq)
+			break;
+	}
+
+	if (&mapping->entry == &from_peer->seq_map) {
+		/* not found. */
+		return NULL;
+	}
+
+	LOG("UNMAP %d <-- %d\n", (int)(mapping->from_seq), (int)from_seq);
+	set_seq(p, mapping->from_seq);
+	return mapping->from;
+}
+
+#endif
+
 static int gtphub_write(struct osmo_fd *to,
 			struct sockaddr_storage *to_addr,
 			socklen_t to_addr_len,
@@ -517,11 +578,14 @@ int from_ggsns_read_cb(struct osmo_fd *from_ggsns_ofd, unsigned int what)
 
 	struct gtphub *hub = from_ggsns_ofd->data;
 
+	struct gtphub_peer *ggsn = NULL;
+	struct gtphub_peer *sgsn = NULL;
+
 	/* TODO this will not be hardcoded. */
-	struct gtphub_peer *sgsn = llist_first(&hub->to_sgsns[port_idx].peers,
-						 struct gtphub_peer, entry);
-	if (!sgsn) {
-		LOGERR("no sgsn");
+	ggsn = llist_first(&hub->to_ggsns[port_idx].peers,
+			   struct gtphub_peer, entry);
+	if (!ggsn) {
+		LOGERR("no ggsn\n");
 		return 0;
 	}
 
@@ -538,6 +602,20 @@ int from_ggsns_read_cb(struct osmo_fd *from_ggsns_ofd, unsigned int what)
 	if (p.rc <= 0)
 		return 0;
 #endif
+
+#if MAP_SEQ
+	sgsn = gtphub_unmap_seq(&p, ggsn);
+#else
+	/* TODO this will not be hardcoded. */
+	sgsn = llist_first(&hub->to_sgsns[port_idx].peers,
+			   struct gtphub_peer, entry);
+#endif
+
+	if (!sgsn) {
+		LOGERR("no sgsn");
+		return 0;
+	}
+
 
 	return gtphub_write(&hub->to_sgsns[port_idx].ofd,
 			    &sgsn->addr.a, sgsn->addr.l,
@@ -583,6 +661,10 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 		return 0;
 #endif
 
+#if MAP_SEQ
+	gtphub_map_seq(&p, sgsn, ggsn);
+#endif
+
 	return gtphub_write(&hub->to_ggsns[port_idx].ofd,
 			    &ggsn->addr.a, ggsn->addr.l,
 			    (uint8_t*)p.data, p.data_len);
@@ -616,7 +698,9 @@ struct gtphub_peer *gtphub_peer_new(struct gtphub_bind *bind)
 {
 	struct gtphub_peer *n = talloc_zero(osmo_gtphub_ctx, struct gtphub_peer);
 
+	INIT_LLIST_HEAD(&n->seq_map);
 	tei_map_init(&n->teim, &bind->teip);
+	n->next_peer_seq = rand(); /* TODO seed or use something else */
 
 	llist_add(&n->entry, &bind->peers);
 	return n;
