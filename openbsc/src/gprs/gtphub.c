@@ -712,3 +712,53 @@ void gtphub_peer_del(struct gtphub_peer *peer)
 	talloc_free(peer);
 }
 
+
+/* TODO move to osmocom/core/socket.c ? */
+/* The caller is required to call freeaddrinfo(*result), iff zero is returned. */
+/* use this in osmo_sock_init() to remove dup. */
+static int _osmo_getaddrinfo(struct addrinfo **result,
+			     uint16_t family, uint16_t type, uint8_t proto,
+			     const char *host, uint16_t port)
+{
+	struct addrinfo hints;
+	char portbuf[16];
+
+	sprintf(portbuf, "%u", port);
+	memset(&hints, '\0', sizeof(struct addrinfo));
+	hints.ai_family = family;
+	if (type == SOCK_RAW) {
+		/* Workaround for glibc, that returns EAI_SERVICE (-8) if
+		 * SOCK_RAW and IPPROTO_GRE is used.
+		 */
+		hints.ai_socktype = SOCK_DGRAM;
+		hints.ai_protocol = IPPROTO_UDP;
+	} else {
+		hints.ai_socktype = type;
+		hints.ai_protocol = proto;
+	}
+
+	return getaddrinfo(host, portbuf, &hints, result);
+}
+
+/* TODO move to osmocom/core/socket.c ?
+ * -- will actually disappear when the GGSNs are resolved by DNS. */
+int osmo_sockaddr_init(struct sockaddr_storage *addr, socklen_t *addr_len,
+		       uint16_t family, uint16_t type, uint8_t proto,
+		       const char *host, uint16_t port)
+{
+	struct addrinfo *res;
+	int rc;
+	rc = _osmo_getaddrinfo(&res, family, type, proto, host, port);
+
+	if (rc != 0) {
+		LOGERR("getaddrinfo returned error %d\n", (int)rc);
+		return -EINVAL;
+	}
+
+	OSMO_ASSERT(res->ai_addrlen <= sizeof(*addr));
+	memcpy(addr, res->ai_addr, res->ai_addrlen);
+	*addr_len = res->ai_addrlen;
+	freeaddrinfo(res);
+
+	return 0;
+}

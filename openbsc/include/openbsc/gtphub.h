@@ -28,6 +28,27 @@
 #include <osmocom/core/select.h>
 
 
+/* support */
+
+/* TODO move to osmocom/core/socket.c ?
+ * -- will actually disappear when the GGSNs are resolved by DNS. */
+#include <netdb.h>
+/*! \brief Initialize a sockaddr \param[out] addr valid sockaddr pointer to
+ * write result to \param[out] addr_len valid pointer to write addr length to
+ * \param[in] family Address Family like AF_INET, AF_INET6, AF_UNSPEC
+ * \param[in] type Socket type like SOCK_DGRAM, SOCK_STREAM \param[in] proto
+ * Protocol like IPPROTO_TCP, IPPROTO_UDP \param[in] host remote host name or
+ * IP address in string form \param[in] port remote port number in host byte
+ * order \returns 0 on success, otherwise an error code (from getaddrinfo()).
+ *
+ * Copy the first result from a getaddrinfo() call with the given parameters to
+ * *addr and *addr_len. On error, do not change *addr and return nonzero.
+ */
+int osmo_sockaddr_init(struct sockaddr_storage *addr, socklen_t *addr_len,
+		       uint16_t family, uint16_t type, uint8_t proto,
+		       const char *host, uint16_t port);
+
+
 /* general */
 
 enum gtphub_port_idx {
