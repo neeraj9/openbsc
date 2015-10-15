@@ -138,6 +138,9 @@ struct gtphub {
 
 /* api */
 
+int gtphub_vty_init(void);
+int gtphub_cfg_read(struct gtphub_cfg *cfg, const char *config_file);
+
 void gtphub_zero(struct gtphub *hub);
 int gtphub_init(struct gtphub *hub, struct gtphub_cfg *cfg);
 

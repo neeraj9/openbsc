@@ -31,15 +31,27 @@
 #include <osmocom/core/application.h>
 #include <osmocom/core/logging.h>
 #include <osmocom/core/utils.h>
+#include <osmocom/core/rate_ctr.h>
+
+#include <osmocom/vty/logging.h>
+#include <osmocom/vty/telnet_interface.h>
 
 #include <openbsc/debug.h>
 #include <openbsc/gtphub.h>
+#include <openbsc/vty.h>
+
+#include "../../bscconfig.h"
 
 #define LOGERR(fmt, args...) \
 	LOGP(DGTPHUB, LOGL_ERROR, fmt, ##args)
 
 #define LOG(fmt, args...) \
 	LOGP(DGTPHUB, LOGL_NOTICE, fmt, ##args)
+
+#ifndef OSMO_VTY_PORT_GTPHUB
+/* should come from libosmocore */
+#define OSMO_VTY_PORT_GTPHUB	4253
+#endif
 
 extern void *osmo_gtphub_ctx;
 
@@ -173,8 +185,19 @@ static void signal_handler(int signal)
 	}
 }
 
+extern int bsc_vty_go_parent(struct vty *vty);
+
+static struct vty_app_info vty_info = {
+	.name 		= "OsmoGTPhub",
+	.version	= PACKAGE_VERSION,
+	.go_parent_cb	= bsc_vty_go_parent,
+	.is_config_node	= bsc_vty_is_config_node,
+};
+
 int main(int argc, char **argv)
 {
+	int rc;
+
 	osmo_gtphub_ctx = talloc_named_const(NULL, 0, "osmo_gtphub");
 
 	signal(SIGINT, &signal_handler);
@@ -185,7 +208,16 @@ int main(int argc, char **argv)
 
 	osmo_init_logging(&gtphub_log_info);
 
-	int rc;
+	vty_info.copyright = gtphub_copyright;
+	vty_init(&vty_info);
+	logging_vty_add_cmds(&gtphub_log_info);
+        gtphub_vty_init();
+
+	rate_ctr_init(osmo_gtphub_ctx);
+	rc = telnet_init(osmo_gtphub_ctx, 0, OSMO_VTY_PORT_GTPHUB);
+	if (rc < 0)
+		exit(1);
+
 
 	struct gtphub_cfg _cfg = {
 	.to_sgsns = {
@@ -209,11 +241,16 @@ int main(int argc, char **argv)
 			  } },
 	},
 	};
-
 	struct gtphub_cfg *cfg = &_cfg;
 
 	struct gtphub _hub;
 	struct gtphub *hub = &_hub;
+
+	rc = gtphub_cfg_read(cfg, ccfg->config_file);
+	if (rc < 0) {
+		LOGP(DGTPHUB, LOGL_FATAL, "Cannot parse config file\n");
+		exit(2);
+	}
 
 	if (gtphub_init(hub, cfg) != 0)
 		return -1;
