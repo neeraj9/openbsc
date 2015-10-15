@@ -19,12 +19,15 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <unistd.h>
+#include <signal.h>
 #include <string.h>
 #include <errno.h>
 
 #define _GNU_SOURCE
 #include <getopt.h>
 
+#include <osmocom/core/signal.h>
 #include <osmocom/core/application.h>
 #include <osmocom/core/logging.h>
 #include <osmocom/core/utils.h>
@@ -148,9 +151,37 @@ void log_cfg(struct gtphub_cfg *cfg)
 	    a->addr_str, a->port);
 }
 
+static void signal_handler(int signal)
+{
+	fprintf(stdout, "signal %u received\n", signal);
+
+	switch (signal) {
+	case SIGINT:
+		osmo_signal_dispatch(SS_L_GLOBAL, S_L_GLOBAL_SHUTDOWN, NULL);
+		sleep(1);
+		exit(0);
+		break;
+	case SIGABRT:
+		/* in case of abort, we want to obtain a talloc report
+		 * and then return to the caller, who will abort the process */
+	case SIGUSR1:
+	case SIGUSR2:
+		talloc_report_full(osmo_gtphub_ctx, stderr);
+		break;
+	default:
+		break;
+	}
+}
+
 int main(int argc, char **argv)
 {
 	osmo_gtphub_ctx = talloc_named_const(NULL, 0, "osmo_gtphub");
+
+	signal(SIGINT, &signal_handler);
+	signal(SIGABRT, &signal_handler);
+	signal(SIGUSR1, &signal_handler);
+	signal(SIGUSR2, &signal_handler);
+	osmo_init_ignore_signals();
 
 	osmo_init_logging(&gtphub_log_info);
 
