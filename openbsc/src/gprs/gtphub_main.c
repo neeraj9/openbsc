@@ -266,6 +266,16 @@ int main(int argc, char **argv)
 				.port = 2152,
 			  } },
 	},
+	.ggsn_proxy = {
+		{
+			.addr_str = "127.0.0.2",
+			.port = 2123,
+		},
+		{
+			.addr_str = "127.0.0.2",
+			.port = 2152,
+		},
+	},
 	};
 	struct gtphub_cfg *cfg = &_cfg;
 
@@ -282,21 +292,6 @@ int main(int argc, char **argv)
 
 	if (gtphub_init(hub, cfg) != 0)
 		return -1;
-
-	/* TODO this will not be configured, gtphub will have to find the
-	 * ggsns from incoming GTP PDUs. */
-	/* Where the GTP ggsn sits that we're relaying for */
-	const char* ggsn_addr_str = "127.0.0.2";
-	uint16_t ggsn_port = 2123;
-	struct gtphub_peer *test_ggsn = gtphub_peer_new(&hub->to_ggsns[GTPH_PORT_CONTROL]);
-	rc = osmo_sockaddr_init(&test_ggsn->addr,
-				AF_UNSPEC, SOCK_DGRAM, IPPROTO_UDP,
-				ggsn_addr_str, ggsn_port);
-	if (rc != 0) {
-		LOGERR("Cannot resolve '%s port %d'\n", ggsn_addr_str, ggsn_port);
-		exit(-1);
-	}
-	LOG("DEBUG: using GGSN %s port %d\n", ggsn_addr_str, ggsn_port);
 
 	log_cfg(cfg);
 

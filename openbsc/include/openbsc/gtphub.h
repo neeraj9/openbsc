@@ -120,6 +120,8 @@ struct gtphub_cfg_bind {
 struct gtphub_cfg {
 	struct gtphub_cfg_bind to_sgsns[GTPH_PORT_N];
 	struct gtphub_cfg_bind to_ggsns[GTPH_PORT_N];
+	struct gtphub_cfg_addr sgsn_proxy[GTPH_PORT_N];
+	struct gtphub_cfg_addr ggsn_proxy[GTPH_PORT_N];
 };
 
 
@@ -155,6 +157,8 @@ struct gtphub_bind {
 struct gtphub {
 	struct gtphub_bind to_sgsns[GTPH_PORT_N];
 	struct gtphub_bind to_ggsns[GTPH_PORT_N];
+	struct gtphub_peer *sgsn_proxy[GTPH_PORT_N];
+	struct gtphub_peer *ggsn_proxy[GTPH_PORT_N];
 };
 
 

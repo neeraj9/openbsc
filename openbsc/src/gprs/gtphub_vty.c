@@ -71,6 +71,12 @@ static int config_write_gtphub(struct vty *vty)
 		    &g_cfg->to_ggsns[GTPH_PORT_CONTROL].bind,
 		    &g_cfg->to_ggsns[GTPH_PORT_USER].bind);
 
+	if (g_cfg->ggsn_proxy[GTPH_PORT_CONTROL].addr_str) {
+		write_addrs(vty, "ggsn-proxy",
+			    &g_cfg->ggsn_proxy[GTPH_PORT_CONTROL],
+			    &g_cfg->ggsn_proxy[GTPH_PORT_USER]);
+	}
+
 	return CMD_SUCCESS;
 }
 
@@ -152,6 +158,62 @@ DEFUN(cfg_gtphub_bind_to_ggsns, cfg_gtphub_bind_to_ggsns_cmd,
 	return handle_binds(g_cfg->to_ggsns, argv);
 }
 
+DEFUN(cfg_gtphub_ggsn_proxy_short, cfg_gtphub_ggsn_proxy_short_cmd,
+	"ggsn-proxy ADDR",
+	"GTP Hub Parameters\n"
+	"Redirect all GGSN bound traffic to default ports on this address (another gtphub)\n"
+	"Remote IP address (v4 or v6)\n"
+	)
+{
+	g_cfg->ggsn_proxy[GTPH_PORT_CONTROL].addr_str = talloc_strdup(tall_vty_ctx, argv[0]);
+	g_cfg->ggsn_proxy[GTPH_PORT_CONTROL].port = GTPH_DEFAULT_CONTROL_PORT;
+	g_cfg->ggsn_proxy[GTPH_PORT_USER].addr_str = talloc_strdup(tall_vty_ctx, argv[0]);
+	g_cfg->ggsn_proxy[GTPH_PORT_USER].port = GTPH_DEFAULT_USER_PORT;
+	return CMD_SUCCESS;
+}
+
+DEFUN(cfg_gtphub_ggsn_proxy, cfg_gtphub_ggsn_proxy_cmd,
+	"ggsn-proxy " BIND_ARGS,
+	"GTP Hub Parameters\n"
+	"Redirect all GGSN bound traffic to these addresses and ports (another gtphub)\n"
+	BIND_DOCS
+	)
+{
+	g_cfg->ggsn_proxy[GTPH_PORT_CONTROL].addr_str = talloc_strdup(tall_vty_ctx, argv[0]);
+	g_cfg->ggsn_proxy[GTPH_PORT_CONTROL].port = atoi(argv[1]);
+	g_cfg->ggsn_proxy[GTPH_PORT_USER].addr_str = talloc_strdup(tall_vty_ctx, argv[2]);
+	g_cfg->ggsn_proxy[GTPH_PORT_USER].port = atoi(argv[3]);
+	return CMD_SUCCESS;
+}
+
+DEFUN(cfg_gtphub_sgsn_proxy_short, cfg_gtphub_sgsn_proxy_short_cmd,
+	"sgsn-proxy ADDR",
+	"GTP Hub Parameters\n"
+	"Redirect all SGSN bound traffic to default ports on this address (another gtphub)\n"
+	"Remote IP address (v4 or v6)\n"
+	)
+{
+	g_cfg->sgsn_proxy[GTPH_PORT_CONTROL].addr_str = talloc_strdup(tall_vty_ctx, argv[0]);
+	g_cfg->sgsn_proxy[GTPH_PORT_CONTROL].port = GTPH_DEFAULT_CONTROL_PORT;
+	g_cfg->sgsn_proxy[GTPH_PORT_USER].addr_str = talloc_strdup(tall_vty_ctx, argv[0]);
+	g_cfg->sgsn_proxy[GTPH_PORT_USER].port = GTPH_DEFAULT_USER_PORT;
+	return CMD_SUCCESS;
+}
+
+DEFUN(cfg_gtphub_sgsn_proxy, cfg_gtphub_sgsn_proxy_cmd,
+	"sgsn-proxy " BIND_ARGS,
+	"GTP Hub Parameters\n"
+	"Redirect all SGSN bound traffic to these addresses and ports (another gtphub)\n"
+	BIND_DOCS
+	)
+{
+	g_cfg->sgsn_proxy[GTPH_PORT_CONTROL].addr_str = talloc_strdup(tall_vty_ctx, argv[0]);
+	g_cfg->sgsn_proxy[GTPH_PORT_CONTROL].port = atoi(argv[1]);
+	g_cfg->sgsn_proxy[GTPH_PORT_USER].addr_str = talloc_strdup(tall_vty_ctx, argv[2]);
+	g_cfg->sgsn_proxy[GTPH_PORT_USER].port = atoi(argv[3]);
+	return CMD_SUCCESS;
+}
+
 DEFUN(show_gtphub, show_gtphub_cmd, "show gtphub",
       SHOW_STR "Display information about the GTP hub")
 {
@@ -172,6 +234,10 @@ int gtphub_vty_init(void)
 	install_element(GTPHUB_NODE, &cfg_gtphub_bind_to_sgsns_cmd);
 	install_element(GTPHUB_NODE, &cfg_gtphub_bind_to_ggsns_short_cmd);
 	install_element(GTPHUB_NODE, &cfg_gtphub_bind_to_ggsns_cmd);
+	install_element(GTPHUB_NODE, &cfg_gtphub_ggsn_proxy_short_cmd);
+	install_element(GTPHUB_NODE, &cfg_gtphub_ggsn_proxy_cmd);
+	install_element(GTPHUB_NODE, &cfg_gtphub_sgsn_proxy_short_cmd);
+	install_element(GTPHUB_NODE, &cfg_gtphub_sgsn_proxy_cmd);
 
 	return 0;
 }

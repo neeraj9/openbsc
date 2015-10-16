@@ -574,19 +574,9 @@ int from_ggsns_read_cb(struct osmo_fd *from_ggsns_ofd, unsigned int what)
 
 	struct gtphub *hub = from_ggsns_ofd->data;
 
-	struct gtphub_peer *ggsn = NULL;
-	struct gtphub_peer *sgsn = NULL;
-
-	/* TODO this will not be hardcoded. */
-	ggsn = llist_first(&hub->to_ggsns[port_idx].peers,
-			   struct gtphub_peer, entry);
-	if (!ggsn) {
-		LOGERR("no ggsn\n");
-		return 0;
-	}
-
 	static uint8_t buf[4096];
-	size_t received = gtphub_read(from_ggsns_ofd, NULL,
+	struct osmo_sockaddr from_addr;
+	size_t received = gtphub_read(from_ggsns_ofd, &from_addr,
 				      buf, sizeof(buf));
 	if (received < 1)
 		return 0;
@@ -599,19 +589,62 @@ int from_ggsns_read_cb(struct osmo_fd *from_ggsns_ofd, unsigned int what)
 		return 0;
 #endif
 
-#if MAP_SEQ
-	sgsn = gtphub_unmap_seq(&p, ggsn);
-#else
-	/* TODO this will not be hardcoded. */
-	sgsn = llist_first(&hub->to_sgsns[port_idx].peers,
-			   struct gtphub_peer, entry);
-#endif
-
-	if (!sgsn) {
-		LOGERR("no sgsn");
+	/* If a GGSN proxy is configured, check that it's indeed that proxy
+	 * talking to us. */
+	struct gtphub_peer *ggsn = hub->ggsn_proxy[port_idx];
+	if (ggsn
+	    && ((ggsn->addr.l != from_addr.l)
+		|| (memcmp(&ggsn->addr.a, &from_addr.a,
+			   from_addr.l) != 0)
+	       )
+	   ){
+		LOGERR("Rejecting: GGSN proxy configured, but GTP packet"
+		       " received on GGSN bind is from another sender:...\n");
+		LOGERR("... proxy: %s (%d)\n",
+		       osmo_hexdump((uint8_t*)&ggsn->addr.a, ggsn->addr.l),
+		       ggsn->addr.l);
+		LOGERR("...sender: %s (%d)\n",
+		       osmo_hexdump((uint8_t*)&from_addr.a, from_addr.l),
+		       from_addr.l);
 		return 0;
 	}
 
+	if (!ggsn) {
+		/* TODO this will not be hardcoded. */
+		ggsn = llist_first(&hub->to_ggsns[port_idx].peers,
+				   struct gtphub_peer, entry);
+	}
+
+	if (!ggsn) {
+		LOGERR("no ggsn\n");
+		return 0;
+	}
+
+
+	struct gtphub_peer *sgsn = hub->sgsn_proxy[port_idx];
+
+#if MAP_SEQ
+	/* Always try to unmap the sequence number (replaced in the packet).
+	 * But give precedence to the SGSN already pointed at by 'sgsn' (the
+	 * SGSN proxy), if set. */
+	struct gtphub_peer *unmap_sgsn = gtphub_unmap_seq(&p, ggsn);
+	if (!sgsn)
+		sgsn = unmap_sgsn;
+	else
+	if (unmap_sgsn && (sgsn != unmap_sgsn))
+		LOGERR("Seq unmap yields an SGSN other than the configured proxy. Using proxy.\n");
+#endif
+
+	if (!sgsn) {
+		/* TODO this will not be hardcoded. */
+		sgsn = llist_first(&hub->to_sgsns[port_idx].peers,
+				   struct gtphub_peer, entry);
+	}
+
+	if (!sgsn) {
+		LOGERR("no sgsn to send to\n");
+		return 0;
+	}
 
 	return gtphub_write(&hub->to_sgsns[port_idx].ofd, &sgsn->addr,
 			    (uint8_t*)p.data, p.data_len);
@@ -628,22 +661,9 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 
 	struct gtphub *hub = from_sgsns_ofd->data;
 
-	/* TODO this will not be hardcoded. */
-	struct gtphub_peer *ggsn = llist_first(&hub->to_ggsns[port_idx].peers,
-					       struct gtphub_peer, entry);
-	if (!ggsn) {
-		LOGERR("no ggsn to send to\n");
-		return 0;
-	}
-
-	/* so far just remembering the last sgsn */
-	struct gtphub_peer *sgsn = llist_first(&hub->to_sgsns[port_idx].peers,
-						 struct gtphub_peer, entry);
-	if (!sgsn)
-		sgsn = gtphub_peer_new(&hub->to_sgsns[port_idx]);
-
 	static uint8_t buf[4096];
-	size_t received = gtphub_read(from_sgsns_ofd, &sgsn->addr,
+	struct osmo_sockaddr from_addr;
+	size_t received = gtphub_read(from_sgsns_ofd, &from_addr,
 				      buf, sizeof(buf));
 	if (received < 1)
 		return 0;
@@ -655,6 +675,49 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 	if (p.rc <= 0)
 		return 0;
 #endif
+	/* If an SGSN proxy is configured, check that it's indeed that proxy
+	 * talking to us. */
+	struct gtphub_peer *sgsn = hub->sgsn_proxy[port_idx];
+	if (sgsn
+	    && ((sgsn->addr.l != from_addr.l)
+		|| (memcmp(&sgsn->addr.a, &from_addr.a,
+			   from_addr.l) != 0)
+	       )
+	   ){
+		LOGERR("Rejecting: SGSN proxy configured, but GTP packet"
+		       " received on SGSN bind is from another sender:...\n");
+		LOGERR("... proxy: %s (%d)\n",
+		       osmo_hexdump((uint8_t*)&sgsn->addr.a, sgsn->addr.l),
+		       sgsn->addr.l);
+		LOGERR("...sender: %s (%d)\n",
+		       osmo_hexdump((uint8_t*)&from_addr.a, from_addr.l),
+		       from_addr.l);
+		return 0;
+	}
+
+	if (!sgsn) {
+		/* TODO this will not be hardcoded. */
+		/* sgsn = gtphub_sgsn_get(hub, ...); */
+		sgsn = llist_first(&hub->to_sgsns[port_idx].peers,
+				   struct gtphub_peer, entry);
+		if (!sgsn)
+			sgsn = gtphub_peer_new(&hub->to_sgsns[port_idx]);
+		memcpy(&sgsn->addr, &from_addr, sizeof(sgsn->addr));
+	}
+
+	struct gtphub_peer *ggsn = hub->ggsn_proxy[port_idx];
+
+	if (!ggsn) {
+		/* TODO this will not be hardcoded. */
+		/* ggsn = gtphub_ggsn_resolve(hub, ...); */
+		ggsn = llist_first(&hub->to_ggsns[port_idx].peers,
+				   struct gtphub_peer, entry);
+	}
+
+	if (!ggsn) {
+		LOGERR("no ggsn to send to\n");
+		return 0;
+	}
 
 #if MAP_SEQ
 	gtphub_map_seq(&p, sgsn, ggsn);
@@ -666,24 +729,75 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 
 int gtphub_init(struct gtphub *hub, struct gtphub_cfg *cfg)
 {
+	int rc;
 	gtphub_zero(hub);
 
 	int port_id;
 	for (port_id = 0; port_id < GTPH_PORT_N; port_id++) {
-		int rc;
 		rc = gtphub_gtp_bind_init(&hub->to_ggsns[port_id],
 					  &cfg->to_ggsns[port_id],
 					  from_ggsns_read_cb, hub, port_id);
-		if (rc < 0)
+		if (rc)
 			return rc;
 
 		rc = gtphub_gtp_bind_init(&hub->to_sgsns[port_id],
 					  &cfg->to_sgsns[port_id],
 					  from_sgsns_read_cb, hub, port_id);
-		if (rc < 0)
+		if (rc)
 			return rc;
 
-		/* ... */
+	}
+
+	/* These are separate loops for grouping of log output. */
+	for (port_id = 0; port_id < GTPH_PORT_N; port_id++) {
+
+		/* trigger only on the control port address. */
+		if (cfg->sgsn_proxy[GTPH_PORT_CONTROL].addr_str) {
+			struct gtphub_peer *sgsn = gtphub_peer_new(&hub->to_sgsns[port_id]);
+			struct gtphub_cfg_addr *addr = &cfg->sgsn_proxy[port_id];
+
+			rc = osmo_sockaddr_init(&sgsn->addr,
+						AF_UNSPEC, SOCK_DGRAM, IPPROTO_UDP,
+						addr->addr_str,
+						addr->port);
+			if (rc) {
+				LOGERR("Cannot resolve '%s port %d'\n",
+				       addr->addr_str,
+				       (int)addr->port);
+				return rc;
+			}
+
+			hub->sgsn_proxy[port_id] = sgsn;
+			LOG("Using SGSN %s proxy %s port %d\n",
+			    gtphub_port_idx_names[port_id],
+			    addr->addr_str,
+			    (int)addr->port);
+		}
+	}
+
+	for (port_id = 0; port_id < GTPH_PORT_N; port_id++) {
+		/* trigger only on the control port address. */
+		if (cfg->ggsn_proxy[GTPH_PORT_CONTROL].addr_str) {
+			struct gtphub_peer *ggsn = gtphub_peer_new(&hub->to_ggsns[port_id]);
+			struct gtphub_cfg_addr *addr = &cfg->ggsn_proxy[port_id];
+
+			rc = osmo_sockaddr_init(&ggsn->addr,
+						AF_UNSPEC, SOCK_DGRAM, IPPROTO_UDP,
+						addr->addr_str,
+						addr->port);
+			if (rc) {
+				LOGERR("Cannot resolve '%s port %d'\n",
+				       addr->addr_str,
+				       (int)addr->port);
+				return rc;
+			}
+
+			hub->ggsn_proxy[port_id] = ggsn;
+			LOG("Using GGSN %s proxy %s port %d\n",
+			    gtphub_port_idx_names[port_id],
+			    addr->addr_str,
+			    (int)addr->port);
+		}
 	}
 	return 0;
 }
