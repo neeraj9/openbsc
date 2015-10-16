@@ -447,22 +447,19 @@ static int gtphub_gtp_bind_init(struct gtphub_bind *b,
 	return 0;
 }
 
-/* Recv datagram from from->fd, optionally write sender's address to *from_addr
- * and *from_addr_len. Return the number of bytes read. */
-/* Send datagram to to->fd using *to_addr. to_addr may be NULL, if an address
- * is set on to->fd. */
-static int gtphub_read(struct osmo_fd *from,
-		       struct sockaddr_storage *from_addr,
-		       socklen_t *from_addr_len,
+/* Recv datagram from from->fd, optionally write sender's address to *from_addr.
+ * Return the number of bytes read, zero on error. */
+static int gtphub_read(const struct osmo_fd *from,
+		       struct osmo_sockaddr *from_addr,
 		       uint8_t *buf, size_t buf_len)
 {
 	/* recvfrom requires the available length to be set in *from_addr_len. */
-	if (from_addr_len && from_addr)
-		*from_addr_len = sizeof(*from_addr);
+	if (from_addr)
+		from_addr->l = sizeof(from_addr->a);
 
 	errno = 0;
 	ssize_t received = recvfrom(from->fd, buf, buf_len, 0,
-				    (struct sockaddr*)from_addr, from_addr_len);
+				    (struct sockaddr*)&from_addr->a, &from_addr->l);
 	/* TODO use recvmsg and get a MSG_TRUNC flag to make sure the message
 	 * is not truncated. Then maybe reduce buf's size. */
 
@@ -473,7 +470,7 @@ static int gtphub_read(struct osmo_fd *from,
 	}
 
 	if (from_addr) {
-		LOG("from %s\n", osmo_hexdump((uint8_t*)from_addr, *from_addr_len));
+		LOG("from %s\n", osmo_hexdump((uint8_t*)&from_addr->a, from_addr->l));
 	}
 
 	if (received <= 0) {
@@ -543,16 +540,15 @@ static struct gtphub_peer *gtphub_unmap_seq(struct gtp_packet_desc *p,
 #endif
 
 static int gtphub_write(struct osmo_fd *to,
-			struct sockaddr_storage *to_addr,
-			socklen_t to_addr_len,
+			struct osmo_sockaddr *to_addr,
 			uint8_t *buf, size_t buf_len)
 {
 	errno = 0;
 	ssize_t sent = sendto(to->fd, buf, buf_len, 0,
-			      (struct sockaddr*)to_addr, to_addr_len);
+			      (struct sockaddr*)&to_addr->a, to_addr->l);
 
 	if (to_addr) {
-		LOG("to %s\n", osmo_hexdump((uint8_t*)to_addr, to_addr_len));
+		LOG("to %s\n", osmo_hexdump((uint8_t*)&to_addr->a, to_addr->l));
 	}
 
 	if (sent == -1) {
@@ -590,7 +586,7 @@ int from_ggsns_read_cb(struct osmo_fd *from_ggsns_ofd, unsigned int what)
 	}
 
 	static uint8_t buf[4096];
-	size_t received = gtphub_read(from_ggsns_ofd, NULL, NULL,
+	size_t received = gtphub_read(from_ggsns_ofd, NULL,
 				      buf, sizeof(buf));
 	if (received < 1)
 		return 0;
@@ -617,8 +613,7 @@ int from_ggsns_read_cb(struct osmo_fd *from_ggsns_ofd, unsigned int what)
 	}
 
 
-	return gtphub_write(&hub->to_sgsns[port_idx].ofd,
-			    &sgsn->addr.a, sgsn->addr.l,
+	return gtphub_write(&hub->to_sgsns[port_idx].ofd, &sgsn->addr,
 			    (uint8_t*)p.data, p.data_len);
 }
 
@@ -648,7 +643,7 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 		sgsn = gtphub_peer_new(&hub->to_sgsns[port_idx]);
 
 	static uint8_t buf[4096];
-	size_t received = gtphub_read(from_sgsns_ofd, &sgsn->addr.a, &sgsn->addr.l,
+	size_t received = gtphub_read(from_sgsns_ofd, &sgsn->addr,
 				      buf, sizeof(buf));
 	if (received < 1)
 		return 0;
@@ -665,8 +660,7 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 	gtphub_map_seq(&p, sgsn, ggsn);
 #endif
 
-	return gtphub_write(&hub->to_ggsns[port_idx].ofd,
-			    &ggsn->addr.a, ggsn->addr.l,
+	return gtphub_write(&hub->to_ggsns[port_idx].ofd, &ggsn->addr,
 			    (uint8_t*)p.data, p.data_len);
 }
 
@@ -740,9 +734,8 @@ static int _osmo_getaddrinfo(struct addrinfo **result,
 	return getaddrinfo(host, portbuf, &hints, result);
 }
 
-/* TODO move to osmocom/core/socket.c ?
- * -- will actually disappear when the GGSNs are resolved by DNS. */
-int osmo_sockaddr_init(struct sockaddr_storage *addr, socklen_t *addr_len,
+/* TODO move to osmocom/core/socket.c ? */
+int osmo_sockaddr_init(struct osmo_sockaddr *addr,
 		       uint16_t family, uint16_t type, uint8_t proto,
 		       const char *host, uint16_t port)
 {
@@ -755,9 +748,9 @@ int osmo_sockaddr_init(struct sockaddr_storage *addr, socklen_t *addr_len,
 		return -EINVAL;
 	}
 
-	OSMO_ASSERT(res->ai_addrlen <= sizeof(*addr));
-	memcpy(addr, res->ai_addr, res->ai_addrlen);
-	*addr_len = res->ai_addrlen;
+	OSMO_ASSERT(res->ai_addrlen <= sizeof(addr->a));
+	memcpy(&addr->a, res->ai_addr, res->ai_addrlen);
+	addr->l = res->ai_addrlen;
 	freeaddrinfo(res);
 
 	return 0;

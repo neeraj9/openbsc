@@ -30,21 +30,27 @@
 
 /* support */
 
-/* TODO move to osmocom/core/socket.c ?
- * -- will actually disappear when the GGSNs are resolved by DNS. */
-#include <netdb.h>
-/*! \brief Initialize a sockaddr \param[out] addr valid sockaddr pointer to
- * write result to \param[out] addr_len valid pointer to write addr length to
- * \param[in] family Address Family like AF_INET, AF_INET6, AF_UNSPEC
- * \param[in] type Socket type like SOCK_DGRAM, SOCK_STREAM \param[in] proto
- * Protocol like IPPROTO_TCP, IPPROTO_UDP \param[in] host remote host name or
- * IP address in string form \param[in] port remote port number in host byte
- * order \returns 0 on success, otherwise an error code (from getaddrinfo()).
+/* TODO move to osmocom/core/socket.c ? */
+#include <netdb.h> /* for IPPROTO_* etc */
+struct osmo_sockaddr {
+	struct sockaddr_storage a;
+	socklen_t l;
+};
+
+/* TODO move to osmocom/core/socket.c ? */
+/*! \brief Initialize a sockaddr
+ * \param[out] addr  Valid osmo_sockaddr pointer to write result to
+ * \param[in] family  Address Family like AF_INET, AF_INET6, AF_UNSPEC
+ * \param[in] type  Socket type like SOCK_DGRAM, SOCK_STREAM
+ * \param[in] proto  Protocol like IPPROTO_TCP, IPPROTO_UDP
+ * \param[in] host Remote host name or IP address in string form
+ * \param[in] port Remote port number in host byte order
+ * \returns 0 on success, otherwise an error code (from getaddrinfo()).
  *
  * Copy the first result from a getaddrinfo() call with the given parameters to
  * *addr and *addr_len. On error, do not change *addr and return nonzero.
  */
-int osmo_sockaddr_init(struct sockaddr_storage *addr, socklen_t *addr_len,
+int osmo_sockaddr_init(struct osmo_sockaddr *addr,
 		       uint16_t family, uint16_t type, uint8_t proto,
 		       const char *host, uint16_t port);
 
@@ -119,15 +125,10 @@ struct gtphub_cfg {
 
 /* state */
 
-struct gtphub_addr {
-	struct sockaddr_storage a;
-	socklen_t l;
-};
-
 struct gtphub_peer {
 	struct llist_head entry;
 
-	struct gtphub_addr addr;
+	struct osmo_sockaddr addr;
 	struct tei_map teim;
 	uint16_t next_peer_seq; /* the latest used sequence nr + 1 */
 	struct llist_head seq_map; /* of struct gtphub_seq_mapping */

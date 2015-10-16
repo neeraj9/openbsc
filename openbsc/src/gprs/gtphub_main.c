@@ -289,7 +289,7 @@ int main(int argc, char **argv)
 	const char* ggsn_addr_str = "127.0.0.2";
 	uint16_t ggsn_port = 2123;
 	struct gtphub_peer *test_ggsn = gtphub_peer_new(&hub->to_ggsns[GTPH_PORT_CONTROL]);
-	rc = osmo_sockaddr_init(&test_ggsn->addr.a, &test_ggsn->addr.l,
+	rc = osmo_sockaddr_init(&test_ggsn->addr,
 				AF_UNSPEC, SOCK_DGRAM, IPPROTO_UDP,
 				ggsn_addr_str, ggsn_port);
 	if (rc != 0) {
