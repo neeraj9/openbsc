@@ -194,6 +194,90 @@ static struct vty_app_info vty_info = {
 	.is_config_node	= bsc_vty_is_config_node,
 };
 
+struct cmdline_cfg {
+	const char *config_file;
+	int daemonize;
+};
+
+static void print_help(struct cmdline_cfg *ccfg)
+{
+	printf("gtphub commandline options\n");
+	printf("  -h --help            This text.\n");
+	printf("  -D --daemonize       Fork the process into a background daemon.\n");
+	printf("  -d,--debug <cat>     Enable Debugging for this category.\n");
+	printf("                       Pass '-d list' to get a category listing.\n");
+	printf("  -s --disable-color");
+	printf("  -c --config-file     The config file to use [%s].\n", ccfg->config_file);
+	printf("  -e,--log-level <nr>  Set a global log level.\n");
+}
+
+static void list_categories(void)
+{
+	printf("Avaliable debug categories:\n");
+	int i;
+	for (i = 0; i < gtphub_log_info.num_cat; ++i) {
+		if (!gtphub_log_info.cat[i].name)
+			continue;
+
+		printf("%s\n", gtphub_log_info.cat[i].name);
+	}
+}
+
+static void handle_options(struct cmdline_cfg *ccfg, int argc, char **argv)
+{
+	while (1) {
+		int option_index = 0, c;
+		static struct option long_options[] = {
+			{"help", 0, 0, 'h'},
+			{"debug", 1, 0, 'd'},
+			{"daemonize", 0, 0, 'D'},
+			{"config-file", 1, 0, 'c'},
+			{"disable-color", 0, 0, 's'},
+			{"timestamp", 0, 0, 'T'},
+			{"log-level", 1, 0, 'e'},
+			{NULL, 0, 0, 0}
+		};
+
+		c = getopt_long(argc, argv, "hd:Dc:sTe:",
+				long_options, &option_index);
+		if (c == -1)
+			break;
+
+		switch (c) {
+		case 'h':
+			//print_usage();
+			print_help(ccfg);
+			exit(0);
+		case 's':
+			log_set_use_color(osmo_stderr_target, 0);
+			break;
+		case 'd':
+			if (strcmp("list", optarg) == 0) {
+				list_categories();
+				exit(0);
+			}
+			else
+				log_parse_category_mask(osmo_stderr_target, optarg);
+			break;
+		case 'D':
+			ccfg->daemonize = 1;
+			break;
+		case 'c':
+			ccfg->config_file = optarg;
+			break;
+		case 'T':
+			log_set_print_timestamp(osmo_stderr_target, 1);
+			break;
+		case 'e':
+			log_set_log_level(osmo_stderr_target, atoi(optarg));
+			break;
+		default:
+			/* ignore */
+			break;
+		}
+	}
+}
+
 int main(int argc, char **argv)
 {
 	int rc;
@@ -218,6 +302,11 @@ int main(int argc, char **argv)
 	if (rc < 0)
 		exit(1);
 
+
+	struct cmdline_cfg _ccfg = {
+		.config_file = "./gtphub.conf"
+	};
+	struct cmdline_cfg *ccfg = &_ccfg;
 
 	struct gtphub_cfg _cfg = {
 	.to_sgsns = {
@@ -246,9 +335,11 @@ int main(int argc, char **argv)
 	struct gtphub _hub;
 	struct gtphub *hub = &_hub;
 
+	handle_options(ccfg, argc, argv);
+
 	rc = gtphub_cfg_read(cfg, ccfg->config_file);
 	if (rc < 0) {
-		LOGP(DGTPHUB, LOGL_FATAL, "Cannot parse config file\n");
+		LOGP(DGTPHUB, LOGL_FATAL, "Cannot parse config file '%s'\n", ccfg->config_file);
 		exit(2);
 	}
 
@@ -272,9 +363,7 @@ int main(int argc, char **argv)
 
 	log_cfg(cfg);
 
-	int daemonize = 0;
-
-	if (daemonize) {
+	if (ccfg->daemonize) {
 		rc = osmo_daemonize();
 		if (rc < 0) {
 			LOGERR("Error during daemonize");
