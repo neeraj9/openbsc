@@ -54,6 +54,37 @@ int osmo_sockaddr_init(struct osmo_sockaddr *addr,
 		       uint16_t family, uint16_t type, uint8_t proto,
 		       const char *host, uint16_t port);
 
+/*! \brief convert sockaddr to human readable string.
+ * \param[out] addr_str  Valid pointer to a buffer of length addr_str_len.
+ * \param[in] addr_str_len  Size of buffer addr_str points at.
+ * \param[out] port_str  Valid pointer to a buffer of length port_str_len.
+ * \param[in] port_str_len  Size of buffer port_str points at.
+ * \param[in] addr  Binary representation as returned by osmo_sockaddr_init().
+ * \param[in] flags  flags as passed to getnameinfo().
+ * \returns  0 on success, an error code on error.
+ *
+ * Return the IPv4 or IPv6 address string and the port (a.k.a. service) string
+ * representations of the given struct osmo_sockaddr in two caller provided
+ * char buffers. Flags of (NI_NUMERICHOST | NI_NUMERICSERV) return numeric
+ * address and port. Either one of addr_str or port_str may be NULL, in which
+ * case nothing is returned there.
+ *
+ * See also osmo_sockaddr_to_str() (less flexible, but much more convenient). */
+int osmo_sockaddr_to_strb(char *addr_str, size_t addr_str_len,
+			  char *port_str, size_t port_str_len,
+			  const struct osmo_sockaddr *addr,
+			  int flags);
+
+/*! \brief conveniently return osmo_sockaddr_to_strb() in a static buffer.
+ * \param[in] addr  Binary representation as returned by osmo_sockaddr_init().
+ * \returns  Address string in static buffer.
+ *
+ * Compose a string of the numeric IP-address and port represented by *addr of
+ * the form "<ip-addr> port <port>". The returned string is valid until the
+ * next invocation of this function.
+ */
+const char *osmo_sockaddr_to_str(const struct osmo_sockaddr *addr);
+
 
 /* general */
 

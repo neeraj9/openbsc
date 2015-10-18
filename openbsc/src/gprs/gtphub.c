@@ -479,7 +479,7 @@ static int gtphub_read(const struct osmo_fd *from,
 	}
 
 	if (from_addr) {
-		LOG("from %s\n", osmo_hexdump((uint8_t*)&from_addr->a, from_addr->l));
+		LOG("from %s\n", osmo_sockaddr_to_str(from_addr));
 	}
 
 	if (received <= 0) {
@@ -557,7 +557,7 @@ static int gtphub_write(struct osmo_fd *to,
 			      (struct sockaddr*)&to_addr->a, to_addr->l);
 
 	if (to_addr) {
-		LOG("to %s\n", osmo_hexdump((uint8_t*)&to_addr->a, to_addr->l));
+		LOG("to %s\n", osmo_sockaddr_to_str(to_addr));
 	}
 
 	if (sent == -1) {
@@ -609,12 +609,8 @@ int from_ggsns_read_cb(struct osmo_fd *from_ggsns_ofd, unsigned int what)
 	   ){
 		LOGERR("Rejecting: GGSN proxy configured, but GTP packet"
 		       " received on GGSN bind is from another sender:...\n");
-		LOGERR("... proxy: %s (%d)\n",
-		       osmo_hexdump((uint8_t*)&ggsn->addr.a, ggsn->addr.l),
-		       ggsn->addr.l);
-		LOGERR("...sender: %s (%d)\n",
-		       osmo_hexdump((uint8_t*)&from_addr.a, from_addr.l),
-		       from_addr.l);
+		LOGERR("... proxy: %s\n", osmo_sockaddr_to_str(&ggsn->addr));
+		LOGERR("...sender: %s\n", osmo_sockaddr_to_str(&from_addr));
 		return 0;
 	}
 
@@ -703,12 +699,8 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 	   ){
 		LOGERR("Rejecting: SGSN proxy configured, but GTP packet"
 		       " received on SGSN bind is from another sender:...\n");
-		LOGERR("... proxy: %s (%d)\n",
-		       osmo_hexdump((uint8_t*)&sgsn->addr.a, sgsn->addr.l),
-		       sgsn->addr.l);
-		LOGERR("...sender: %s (%d)\n",
-		       osmo_hexdump((uint8_t*)&from_addr.a, from_addr.l),
-		       from_addr.l);
+		LOGERR("... proxy: %s\n", osmo_sockaddr_to_str(&sgsn->addr));
+		LOGERR("...sender: %s\n", osmo_sockaddr_to_str(&from_addr));
 		return 0;
 	}
 
@@ -909,4 +901,42 @@ int osmo_sockaddr_init(struct osmo_sockaddr *addr,
 	freeaddrinfo(res);
 
 	return 0;
+}
+
+int osmo_sockaddr_to_strb(char *addr_str, size_t addr_str_len,
+			  char *port_str, size_t port_str_len,
+			  const struct osmo_sockaddr *addr,
+			  int flags)
+{
+       int rc;
+
+       rc = getnameinfo((struct sockaddr*)&addr->a, addr->l,
+			addr_str, addr_str_len,
+			port_str, port_str_len,
+			flags);
+
+       if (rc)
+	       LOGP(DGTPHUB, LOGL_ERROR, "Invalid address: %s: %s\n", gai_strerror(rc),
+		    osmo_hexdump((uint8_t*)&addr->a, addr->l));
+
+       return rc;
+}
+
+const char *osmo_sockaddr_to_str(const struct osmo_sockaddr *addr)
+{
+	static char buf[256];
+	char portbuf[6];
+	if (osmo_sockaddr_to_strb(buf, sizeof(buf),
+				  portbuf, sizeof(portbuf),
+				  addr,
+				  NI_NUMERICHOST | NI_NUMERICSERV))
+		return NULL;
+
+	char *pos = buf + strnlen(buf, sizeof(buf)-1);
+	size_t len = sizeof(buf) - (pos - buf);
+
+	snprintf(pos, len, " port %s", portbuf);
+	buf[sizeof(buf)-1] = '\0';
+
+	return buf;
 }
