@@ -655,6 +655,14 @@ int from_ggsns_read_cb(struct osmo_fd *from_ggsns_ofd, unsigned int what)
 		return 0;
 	}
 
+#if MAP_SEQ
+	/* If the GGSN is replying to an SGSN request, the sequence nr has
+	 * already been unmapped above (unmap_sgsn != NULL), and we need not
+	 * create a new outgoing sequence map. */
+	if (!unmap_sgsn)
+		gtphub_map_seq(&p, ggsn, sgsn);
+#endif
+
 	return gtphub_write(&hub->to_sgsns[port_idx].ofd, &sgsn->addr,
 			    (uint8_t*)p.data, p.data_len);
 }
@@ -716,6 +724,18 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 
 	struct gtphub_peer *ggsn = hub->ggsn_proxy[port_idx];
 
+#if MAP_SEQ
+	/* Always unmap the sequence number (replaced in the packet). But give
+	 * precedence to the GGSN already pointed at by 'ggsn' (the GGSN
+	 * proxy), if set. */
+	struct gtphub_peer *unmap_ggsn = gtphub_unmap_seq(&p, sgsn);
+	if (!ggsn)
+		ggsn = unmap_ggsn;
+	else
+	if (unmap_ggsn && (ggsn != unmap_ggsn))
+		LOGERR("Seq unmap yields a GGSN other than the configured proxy. Using proxy.\n");
+#endif
+
 	if (!ggsn) {
 		/* TODO this will not be hardcoded. */
 		/* ggsn = gtphub_ggsn_resolve(hub, ...); */
@@ -729,7 +749,11 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 	}
 
 #if MAP_SEQ
-	gtphub_map_seq(&p, sgsn, ggsn);
+	/* If the SGSN is replying to a GGSN request, the sequence nr has
+	 * already been unmapped above (unmap_ggsn != NULL), and we need not
+	 * create a new outgoing sequence map. */
+	if (!unmap_ggsn)
+		gtphub_map_seq(&p, sgsn, ggsn);
 #endif
 
 	return gtphub_write(&hub->to_ggsns[port_idx].ofd, &ggsn->addr,
