@@ -413,6 +413,15 @@ static int gtphub_sock_init(struct osmo_fd *ofd,
 			    void *data,
 			    int ofd_id)
 {
+	if (!addr->addr_str) {
+		LOGERR("Cannot bind: empty address.\n");
+		return -1;
+	}
+	if (!addr->port) {
+		LOGERR("Cannot bind: zero port not permitted.\n");
+		return -1;
+	}
+
 	ofd->when = BSC_FD_READ;
 	ofd->cb = cb;
 	ofd->data = data;
@@ -737,15 +746,20 @@ int gtphub_init(struct gtphub *hub, struct gtphub_cfg *cfg)
 		rc = gtphub_gtp_bind_init(&hub->to_ggsns[port_id],
 					  &cfg->to_ggsns[port_id],
 					  from_ggsns_read_cb, hub, port_id);
-		if (rc)
+		if (rc) {
+			LOGERR("Failed to bind for GGSNs (%s)\n",
+			       gtphub_port_idx_names[port_id]);
 			return rc;
+		}
 
 		rc = gtphub_gtp_bind_init(&hub->to_sgsns[port_id],
 					  &cfg->to_sgsns[port_id],
 					  from_sgsns_read_cb, hub, port_id);
-		if (rc)
+		if (rc) {
+			LOGERR("Failed to bind for SGSNs (%s)\n",
+			       gtphub_port_idx_names[port_id]);
 			return rc;
-
+		}
 	}
 
 	/* These are separate loops for grouping of log output. */

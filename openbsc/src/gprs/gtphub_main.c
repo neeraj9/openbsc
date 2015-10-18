@@ -239,45 +239,14 @@ int main(int argc, char **argv)
 	if (rc < 0)
 		exit(1);
 
-
-	struct cmdline_cfg _ccfg = {
-		.config_file = "./gtphub.conf"
-	};
+	struct cmdline_cfg _ccfg;
 	struct cmdline_cfg *ccfg = &_ccfg;
+	memset(ccfg, '\0', sizeof(*ccfg));
+	ccfg->config_file = "./gtphub.conf";
 
-	struct gtphub_cfg _cfg = {
-	.to_sgsns = {
-		{ .bind = {
-				.addr_str = "127.0.0.3",
-				.port = 2123,
-			  } },
-		{ .bind = {
-				.addr_str = "127.0.0.3",
-				.port = 2152,
-			  } },
-	},
-	.to_ggsns = {
-		{ .bind = {
-				.addr_str = "127.0.0.4",
-				.port = 2123,
-			  } },
-		{ .bind = {
-				.addr_str = "127.0.0.4",
-				.port = 2152,
-			  } },
-	},
-	.ggsn_proxy = {
-		{
-			.addr_str = "127.0.0.2",
-			.port = 2123,
-		},
-		{
-			.addr_str = "127.0.0.2",
-			.port = 2152,
-		},
-	},
-	};
+	struct gtphub_cfg _cfg;
 	struct gtphub_cfg *cfg = &_cfg;
+	memset(cfg, '\0', sizeof(*cfg));
 
 	struct gtphub _hub;
 	struct gtphub *hub = &_hub;
