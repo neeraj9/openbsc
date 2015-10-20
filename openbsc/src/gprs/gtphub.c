@@ -555,18 +555,28 @@ static struct gtphub_seq_mapping *seqmap_get(struct llist_head *map,
 					     uint16_t *next_peer_seq,
 					     uint16_t orig_seq)
 {
-	struct gtphub_seq_mapping *m = gtphub_seq_mapping_new();
-	OSMO_ASSERT(m);
+	struct gtphub_seq_mapping *m;
 
-	m->peer_seq = (*next_peer_seq)++;
-	m->from_seq = orig_seq;
-	LOG("  MAP %d --> %d\n", (int)m->from_seq, (int)m->peer_seq);
+	llist_for_each_entry(m, map, entry) {
+		if (m->from_seq == orig_seq)
+			break;
+	}
+
+	if (&m->entry == map) {
+		/* No entry exists yet. */
+		m = gtphub_seq_mapping_new();
+		OSMO_ASSERT(m);
+		m->peer_seq = (*next_peer_seq)++;
+		m->from_seq = orig_seq;
+		LOG("  MAP %d --> %d\n", (int)m->from_seq, (int)m->peer_seq);
+	}
 
 	m->expiry = gtphub_expiry_in(GTPH_SEQ_MAPPING_EXPIRY_SECS);
 
 	/* Store in to_peer's map, so when we later receive a GTP packet back
-	 * from to_peer, the seq nr can be unmapped to its origin. Add to the
-	 * tail to sort by expiry, ascending. */
+	 * from to_peer, the seq nr can be unmapped to its origin. Add/move to
+	 * the tail to always sort by expiry, ascending. */
+	llist_del(&m->entry);
 	llist_add_tail(&m->entry, map);
 
 	return m;
