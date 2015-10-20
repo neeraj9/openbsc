@@ -551,21 +551,15 @@ static void gtphub_seq_mapping_del(struct gtphub_seq_mapping *mapping)
 	talloc_free(mapping);
 }
 
-static int gtphub_map_seq(struct gtp_packet_desc *p,
-			  struct gtphub_peer *from_peer, struct gtphub_peer *to_peer)
+static struct gtphub_seq_mapping *seqmap_get(struct llist_head *map,
+					     uint16_t *next_peer_seq,
+					     uint16_t orig_seq)
 {
 	struct gtphub_seq_mapping *m = gtphub_seq_mapping_new();
 	OSMO_ASSERT(m);
 
-	m->from = from_peer;
-	gtphub_peer_ref_count_inc(m->from);
-
-	/* The new seq nr used when sending out to the peer */
-	m->peer_seq = to_peer->next_peer_seq++;
-
-	/* The original seq nr that came in the GTP packet. */
-	m->from_seq = get_seq(p);
-	
+	m->peer_seq = (*next_peer_seq)++;
+	m->from_seq = orig_seq;
 	LOG("  MAP %d --> %d\n", (int)m->from_seq, (int)m->peer_seq);
 
 	m->expiry = gtphub_expiry_in(GTPH_SEQ_MAPPING_EXPIRY_SECS);
@@ -573,7 +567,38 @@ static int gtphub_map_seq(struct gtp_packet_desc *p,
 	/* Store in to_peer's map, so when we later receive a GTP packet back
 	 * from to_peer, the seq nr can be unmapped to its origin. Add to the
 	 * tail to sort by expiry, ascending. */
-	llist_add_tail(&m->entry, &to_peer->seq_map);
+	llist_add_tail(&m->entry, map);
+
+	return m;
+}
+
+static struct gtphub_seq_mapping *seqmap_get_rev(const struct llist_head *map,
+						 uint16_t mapped_seq)
+{
+	struct gtphub_seq_mapping *mapping;
+	llist_for_each_entry(mapping, map, entry) {
+		if (mapping->peer_seq == mapped_seq)
+			break;
+	}
+
+	if (&mapping->entry == map) {
+		/* not found. */
+		return NULL;
+	}
+
+	LOG("UNMAP %d <-- %d\n", (int)(mapping->from_seq), (int)mapped_seq);
+	return mapping;
+}
+
+static int gtphub_map_seq(struct gtp_packet_desc *p,
+			  struct gtphub_peer *from_peer, struct gtphub_peer *to_peer)
+{
+	struct gtphub_seq_mapping *m;
+	m = seqmap_get(&to_peer->seq_map, &to_peer->next_peer_seq,
+		       get_seq(p));
+
+	m->from = from_peer;
+	gtphub_peer_ref_count_inc(m->from);
 
 	/* Change the GTP packet to yield the new, mapped seq nr */
 	set_seq(p, m->peer_seq);
@@ -582,26 +607,15 @@ static int gtphub_map_seq(struct gtp_packet_desc *p,
 }
 
 static struct gtphub_peer *gtphub_unmap_seq(struct gtp_packet_desc *p,
-					    struct gtphub_peer *from_peer)
+					    struct gtphub_peer *replying_peer)
 {
 	OSMO_ASSERT(p->version == 1);
-
-	uint16_t from_seq = get_seq(p);
-
-	struct gtphub_seq_mapping *mapping;
-	llist_for_each_entry(mapping, &from_peer->seq_map, entry) {
-		if (mapping->peer_seq == from_seq)
-			break;
-	}
-
-	if (&mapping->entry == &from_peer->seq_map) {
-		/* not found. */
+	struct gtphub_seq_mapping *m = seqmap_get_rev(&replying_peer->seq_map,
+						      get_seq(p));
+	if (!m)
 		return NULL;
-	}
-
-	LOG("UNMAP %d <-- %d\n", (int)(mapping->from_seq), (int)from_seq);
-	set_seq(p, mapping->from_seq);
-	return mapping->from;
+	set_seq(p, m->from_seq);
+	return m->from;
 }
 
 #endif
