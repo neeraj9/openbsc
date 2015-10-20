@@ -117,7 +117,7 @@ struct tei_mapping {
 };
 
 struct tei_map {
-	struct tei_pool *pool;
+	struct tei_pool *pool; /* multiple tei_maps can share a tei_pool. */
 	struct llist_head mappings;
 };
 
@@ -171,7 +171,7 @@ struct gtphub_peer {
 struct gtphub_seq_mapping {
 	struct llist_head entry;
 
-	uint16_t peer_seq;
+	uint16_t peer_seq; /* the new seq nr going out to the peer */
 	struct gtphub_peer *from;
 	uint16_t from_seq;
 	struct timeval timeout;
@@ -188,7 +188,11 @@ struct gtphub_bind {
 struct gtphub {
 	struct gtphub_bind to_sgsns[GTPH_PORT_N];
 	struct gtphub_bind to_ggsns[GTPH_PORT_N];
+
+	/* pointers to an entry of to_sgsns[x].peers */
 	struct gtphub_peer *sgsn_proxy[GTPH_PORT_N];
+
+	/* pointers to an entry of to_ggsns[x].peers */
 	struct gtphub_peer *ggsn_proxy[GTPH_PORT_N];
 };
 

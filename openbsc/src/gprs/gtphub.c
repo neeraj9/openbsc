@@ -512,12 +512,22 @@ static int gtphub_map_seq(struct gtp_packet_desc *p,
 	struct gtphub_seq_mapping *m = talloc_zero(osmo_gtphub_ctx, struct gtphub_seq_mapping);
 	OSMO_ASSERT(m);
 
-	m->peer_seq = to_peer->next_peer_seq++;
 	m->from = from_peer;
+
+	/* The new seq nr used when sending out to the peer */
+	m->peer_seq = to_peer->next_peer_seq++;
+
+	/* The original seq nr that came in the GTP packet. */
 	m->from_seq = get_seq(p);
+	
 	LOG("  MAP %d --> %d\n", (int)m->from_seq, (int)m->peer_seq);
 
+	/* Store in to_peer's map, so when we later receive a GTP packet back
+	 * from to_peer, the seq nr can be unmapped to its origin. Add to the
+	 * tail to sort by expiry, ascending. */
 	llist_add(&m->entry, &to_peer->seq_map);
+
+	/* Change the GTP packet to yield the new, mapped seq nr */
 	set_seq(p, m->peer_seq);
 
 	return 0;
