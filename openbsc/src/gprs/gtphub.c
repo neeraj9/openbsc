@@ -23,6 +23,7 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <time.h>
+#include <limits.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -509,6 +510,18 @@ static int gtphub_read(const struct osmo_fd *from,
 
 #if MAP_SEQ
 
+inline void gtphub_peer_ref_count_inc(struct gtphub_peer *p)
+{
+	OSMO_ASSERT(p->ref_count < UINT_MAX);
+	p->ref_count++;
+}
+
+inline void gtphub_peer_ref_count_dec(struct gtphub_peer *p)
+{
+	OSMO_ASSERT(p->ref_count > 0);
+	p->ref_count--;
+}
+
 inline uint16_t get_seq(struct gtp_packet_desc *p)
 {
 	OSMO_ASSERT(p->version == 1);
@@ -532,6 +545,9 @@ static struct gtphub_seq_mapping *gtphub_seq_mapping_new(void)
 static void gtphub_seq_mapping_del(struct gtphub_seq_mapping *mapping)
 {
 	llist_del(&mapping->entry);
+
+	if (mapping->from)
+		gtphub_peer_ref_count_dec(mapping->from);
 	talloc_free(mapping);
 }
 
@@ -542,6 +558,7 @@ static int gtphub_map_seq(struct gtp_packet_desc *p,
 	OSMO_ASSERT(m);
 
 	m->from = from_peer;
+	gtphub_peer_ref_count_inc(m->from);
 
 	/* The new seq nr used when sending out to the peer */
 	m->peer_seq = to_peer->next_peer_seq++;
@@ -820,6 +837,14 @@ static void gtphub_gc_bind(struct gtphub *hub, struct gtphub_bind *b)
 	struct gtphub_peer *p, *n;
 	llist_for_each_entry_safe(p, n, &b->peers, entry) {
 		gtphub_gc_peer(hub, p);
+
+		if ((!p->ref_count)
+		    && llist_empty(&p->seq_map)) {
+
+			LOG("expired: peer %s\n",
+			    osmo_sockaddr_to_str(&p->addr));
+			gtphub_peer_del(p);
+		}
 	}
 }
 
@@ -892,6 +917,10 @@ int gtphub_init(struct gtphub *hub, struct gtphub_cfg *cfg)
 			}
 
 			hub->sgsn_proxy[port_id] = sgsn;
+
+			/* This is *the* proxy SGSN. Make sure it is never expired. */
+			gtphub_peer_ref_count_inc(sgsn);
+
 			LOG("Using SGSN %s proxy %s port %d\n",
 			    gtphub_port_idx_names[port_id],
 			    addr->addr_str,
@@ -917,6 +946,10 @@ int gtphub_init(struct gtphub *hub, struct gtphub_cfg *cfg)
 			}
 
 			hub->ggsn_proxy[port_id] = ggsn;
+
+			/* This is *the* proxy GGSN. Make sure it is never expired. */
+			gtphub_peer_ref_count_inc(ggsn);
+
 			LOG("Using GGSN %s proxy %s port %d\n",
 			    gtphub_port_idx_names[port_id],
 			    addr->addr_str,
@@ -945,6 +978,12 @@ struct gtphub_peer *gtphub_peer_new(struct gtphub_bind *bind)
 
 void gtphub_peer_del(struct gtphub_peer *peer)
 {
+	struct gtphub_seq_mapping *m;
+	struct gtphub_seq_mapping *n;
+	llist_for_each_entry_safe(m, n, &peer->seq_map, entry) {
+		gtphub_seq_mapping_del(m);
+	}
+
 	llist_del(&peer->entry);
 	talloc_free(peer);
 }

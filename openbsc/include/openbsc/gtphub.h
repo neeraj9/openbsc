@@ -165,7 +165,7 @@ struct gtphub_peer {
 	struct tei_map teim;
 	uint16_t next_peer_seq; /* the latest used sequence nr + 1 */
 	struct llist_head seq_map; /* of struct gtphub_seq_mapping */
-	int ref_count; /* references from other peers' seq_maps */
+	unsigned int ref_count; /* references from other peers' seq_maps */
 };
 
 struct gtphub_seq_mapping {
