@@ -164,11 +164,11 @@ struct gtphub_peer {
 	struct osmo_sockaddr addr;
 	struct tei_map teim;
 	uint16_t next_peer_seq; /* the latest used sequence nr + 1 */
-	struct llist_head seq_map; /* of struct gtphub_seq_mapping */
+	struct llist_head seqmap; /* of struct gtphub_seqmap */
 	unsigned int ref_count; /* references from other peers' seq_maps */
 };
 
-struct gtphub_seq_mapping {
+struct gtphub_seqmap {
 	struct llist_head entry;
 
 	uint16_t peer_seq; /* the new seq nr going out to the peer */

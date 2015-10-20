@@ -534,28 +534,28 @@ inline void set_seq(struct gtp_packet_desc *p, uint16_t seq)
 	p->data->gtp1l.h.seq = hton16(seq);
 }
 
-static struct gtphub_seq_mapping *gtphub_seq_mapping_new(void)
+static struct gtphub_seqmap *gtphub_seqmap_new(void)
 {
-	struct gtphub_seq_mapping *n;
-	n = talloc_zero(osmo_gtphub_ctx, struct gtphub_seq_mapping);
+	struct gtphub_seqmap *n;
+	n = talloc_zero(osmo_gtphub_ctx, struct gtphub_seqmap);
 	OSMO_ASSERT(n);
 	return n;
 }
 
-static void gtphub_seq_mapping_del(struct gtphub_seq_mapping *mapping)
+static void gtphub_seqmap_del(struct gtphub_seqmap *m)
 {
-	llist_del(&mapping->entry);
+	llist_del(&m->entry);
 
-	if (mapping->from)
-		gtphub_peer_ref_count_dec(mapping->from);
-	talloc_free(mapping);
+	if (m->from)
+		gtphub_peer_ref_count_dec(m->from);
+	talloc_free(m);
 }
 
-static struct gtphub_seq_mapping *seqmap_get(struct llist_head *map,
-					     uint16_t *next_peer_seq,
-					     uint16_t orig_seq)
+static struct gtphub_seqmap *gtphub_seqmap_get(struct llist_head *map,
+					       uint16_t *next_peer_seq,
+					       uint16_t orig_seq)
 {
-	struct gtphub_seq_mapping *m;
+	struct gtphub_seqmap *m;
 
 	llist_for_each_entry(m, map, entry) {
 		if (m->from_seq == orig_seq)
@@ -564,8 +564,7 @@ static struct gtphub_seq_mapping *seqmap_get(struct llist_head *map,
 
 	if (&m->entry == map) {
 		/* No entry exists yet. */
-		m = gtphub_seq_mapping_new();
-		OSMO_ASSERT(m);
+		m = gtphub_seqmap_new();
 		m->peer_seq = (*next_peer_seq)++;
 		m->from_seq = orig_seq;
 		LOG("  MAP %d --> %d\n", (int)m->from_seq, (int)m->peer_seq);
@@ -582,30 +581,30 @@ static struct gtphub_seq_mapping *seqmap_get(struct llist_head *map,
 	return m;
 }
 
-static struct gtphub_seq_mapping *seqmap_get_rev(const struct llist_head *map,
-						 uint16_t mapped_seq)
+static struct gtphub_seqmap *gtphub_seqmap_get_rev(const struct llist_head *map,
+						   uint16_t mapped_seq)
 {
-	struct gtphub_seq_mapping *mapping;
-	llist_for_each_entry(mapping, map, entry) {
-		if (mapping->peer_seq == mapped_seq)
+	struct gtphub_seqmap *m;
+	llist_for_each_entry(m, map, entry) {
+		if (m->peer_seq == mapped_seq)
 			break;
 	}
 
-	if (&mapping->entry == map) {
+	if (&m->entry == map) {
 		/* not found. */
 		return NULL;
 	}
 
-	LOG("UNMAP %d <-- %d\n", (int)(mapping->from_seq), (int)mapped_seq);
-	return mapping;
+	LOG("UNMAP %d <-- %d\n", (int)(m->from_seq), (int)mapped_seq);
+	return m;
 }
 
 static int gtphub_map_seq(struct gtp_packet_desc *p,
 			  struct gtphub_peer *from_peer, struct gtphub_peer *to_peer)
 {
-	struct gtphub_seq_mapping *m;
-	m = seqmap_get(&to_peer->seq_map, &to_peer->next_peer_seq,
-		       get_seq(p));
+	struct gtphub_seqmap *m;
+	m = gtphub_seqmap_get(&to_peer->seqmap, &to_peer->next_peer_seq,
+			      get_seq(p));
 
 	m->from = from_peer;
 	gtphub_peer_ref_count_inc(m->from);
@@ -620,8 +619,8 @@ static struct gtphub_peer *gtphub_unmap_seq(struct gtp_packet_desc *p,
 					    struct gtphub_peer *replying_peer)
 {
 	OSMO_ASSERT(p->version == 1);
-	struct gtphub_seq_mapping *m = seqmap_get_rev(&replying_peer->seq_map,
-						      get_seq(p));
+	struct gtphub_seqmap *m = gtphub_seqmap_get_rev(&replying_peer->seqmap,
+							get_seq(p));
 	if (!m)
 		return NULL;
 	set_seq(p, m->from_seq);
@@ -836,11 +835,11 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 
 static void gtphub_gc_peer(struct gtphub *hub, struct gtphub_peer *peer)
 {
-	struct gtphub_seq_mapping *m;
-	struct gtphub_seq_mapping *n;
-	llist_for_each_entry_safe(m, n, &peer->seq_map, entry) {
+	struct gtphub_seqmap *m;
+	struct gtphub_seqmap *n;
+	llist_for_each_entry_safe(m, n, &peer->seqmap, entry) {
 		if (m->expiry <= hub->now) {
-			gtphub_seq_mapping_del(m);
+			gtphub_seqmap_del(m);
 			LOG("expired: %d: seq mapping from %s to %s: %d->%d\n",
 			    (int)m->expiry,
 			    osmo_sockaddr_to_str(&m->from->addr),
@@ -863,7 +862,7 @@ static void gtphub_gc_bind(struct gtphub *hub, struct gtphub_bind *b)
 		gtphub_gc_peer(hub, p);
 
 		if ((!p->ref_count)
-		    && llist_empty(&p->seq_map)) {
+		    && llist_empty(&p->seqmap)) {
 
 			LOG("expired: peer %s\n",
 			    osmo_sockaddr_to_str(&p->addr));
@@ -989,7 +988,7 @@ struct gtphub_peer *gtphub_peer_new(struct gtphub_bind *bind)
 {
 	struct gtphub_peer *n = talloc_zero(osmo_gtphub_ctx, struct gtphub_peer);
 
-	INIT_LLIST_HEAD(&n->seq_map);
+	INIT_LLIST_HEAD(&n->seqmap);
 	tei_map_init(&n->teim, &bind->teip);
 	/* TODO use something random to pick the initial sequence nr.
 	   0x6d31 produces the ASCII character sequence 'm1', currently used in
@@ -1002,10 +1001,10 @@ struct gtphub_peer *gtphub_peer_new(struct gtphub_bind *bind)
 
 void gtphub_peer_del(struct gtphub_peer *peer)
 {
-	struct gtphub_seq_mapping *m;
-	struct gtphub_seq_mapping *n;
-	llist_for_each_entry_safe(m, n, &peer->seq_map, entry) {
-		gtphub_seq_mapping_del(m);
+	struct gtphub_seqmap *m;
+	struct gtphub_seqmap *n;
+	llist_for_each_entry_safe(m, n, &peer->seqmap, entry) {
+		gtphub_seqmap_del(m);
 	}
 
 	llist_del(&peer->entry);
