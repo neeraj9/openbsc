@@ -22,6 +22,7 @@
 #include <string.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <time.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -37,6 +38,9 @@
 
 #define GTPHUB_DEBUG 1
 #define MAP_SEQ 1
+
+static const int GTPH_GC_TICK = 1;
+static const int GTPH_SEQ_MAPPING_EXPIRY_SECS = 30;
 
 void *osmo_gtphub_ctx;
 
@@ -321,6 +325,18 @@ const char* const gtphub_port_idx_names[GTPH_PORT_N] = {
 	"USER",
 };
 
+static time_t gtphub_now(void)
+{
+	struct timespec now_tp;
+	OSMO_ASSERT(clock_gettime(CLOCK_MONOTONIC, &now_tp) >= 0);
+	return now_tp.tv_sec;
+}
+
+static time_t gtphub_expiry_in(int seconds)
+{
+	return gtphub_now() + seconds;
+}
+
 
 /* tei_map, tei_pool */
 
@@ -505,11 +521,24 @@ inline void set_seq(struct gtp_packet_desc *p, uint16_t seq)
 	p->data->gtp1l.h.seq = hton16(seq);
 }
 
+static struct gtphub_seq_mapping *gtphub_seq_mapping_new(void)
+{
+	struct gtphub_seq_mapping *n;
+	n = talloc_zero(osmo_gtphub_ctx, struct gtphub_seq_mapping);
+	OSMO_ASSERT(n);
+	return n;
+}
+
+static void gtphub_seq_mapping_del(struct gtphub_seq_mapping *mapping)
+{
+	llist_del(&mapping->entry);
+	talloc_free(mapping);
+}
+
 static int gtphub_map_seq(struct gtp_packet_desc *p,
 			  struct gtphub_peer *from_peer, struct gtphub_peer *to_peer)
 {
-
-	struct gtphub_seq_mapping *m = talloc_zero(osmo_gtphub_ctx, struct gtphub_seq_mapping);
+	struct gtphub_seq_mapping *m = gtphub_seq_mapping_new();
 	OSMO_ASSERT(m);
 
 	m->from = from_peer;
@@ -522,10 +551,12 @@ static int gtphub_map_seq(struct gtp_packet_desc *p,
 	
 	LOG("  MAP %d --> %d\n", (int)m->from_seq, (int)m->peer_seq);
 
+	m->expiry = gtphub_expiry_in(GTPH_SEQ_MAPPING_EXPIRY_SECS);
+
 	/* Store in to_peer's map, so when we later receive a GTP packet back
 	 * from to_peer, the seq nr can be unmapped to its origin. Add to the
 	 * tail to sort by expiry, ascending. */
-	llist_add(&m->entry, &to_peer->seq_map);
+	llist_add_tail(&m->entry, &to_peer->seq_map);
 
 	/* Change the GTP packet to yield the new, mapped seq nr */
 	set_seq(p, m->peer_seq);
@@ -762,6 +793,59 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 			    (uint8_t*)p.data, p.data_len);
 }
 
+static void gtphub_gc_peer(struct gtphub *hub, struct gtphub_peer *peer)
+{
+	struct gtphub_seq_mapping *m;
+	struct gtphub_seq_mapping *n;
+	llist_for_each_entry_safe(m, n, &peer->seq_map, entry) {
+		if (m->expiry <= hub->now) {
+			gtphub_seq_mapping_del(m);
+			LOG("expired: %d: seq mapping from %s to %s: %d->%d\n",
+			    (int)m->expiry,
+			    osmo_sockaddr_to_str(&m->from->addr),
+			    osmo_sockaddr_to_str(&peer->addr),
+			    (int)m->from_seq, (int)m->peer_seq);
+		}
+		else {
+			/* The seq mappings will always have monotonous expiry
+			 * values. When we hit an unexpired entry, only more
+			 * unexpired ones will follow. */
+			break;
+		}
+	}
+}
+
+static void gtphub_gc_bind(struct gtphub *hub, struct gtphub_bind *b)
+{
+	struct gtphub_peer *p, *n;
+	llist_for_each_entry_safe(p, n, &b->peers, entry) {
+		gtphub_gc_peer(hub, p);
+	}
+}
+
+static void gtphub_gc_cb(void *data)
+{
+	struct gtphub *hub = data;
+
+	hub->now = gtphub_now();
+
+	int i;
+	for (i = 0; i < GTPH_PORT_N; i++) {
+		gtphub_gc_bind(hub, &hub->to_sgsns[i]);
+		gtphub_gc_bind(hub, &hub->to_ggsns[i]);
+	}
+
+	osmo_timer_schedule(&hub->gc_timer, GTPH_GC_TICK, 0);
+}
+
+static void gtphub_gc_start(struct gtphub *hub)
+{
+	hub->gc_timer.cb = gtphub_gc_cb;
+	hub->gc_timer.data = hub;
+
+	osmo_timer_schedule(&hub->gc_timer, GTPH_GC_TICK, 0);
+}
+
 int gtphub_init(struct gtphub *hub, struct gtphub_cfg *cfg)
 {
 	int rc;
@@ -839,6 +923,8 @@ int gtphub_init(struct gtphub *hub, struct gtphub_cfg *cfg)
 			    (int)addr->port);
 		}
 	}
+
+	gtphub_gc_start(hub);
 	return 0;
 }
 

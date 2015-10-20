@@ -23,9 +23,9 @@
 
 #include <stdint.h>
 #include <sys/socket.h>
-#include <sys/time.h>
 
 #include <osmocom/core/select.h>
+#include <osmocom/core/timer.h>
 
 
 /* support */
@@ -174,7 +174,7 @@ struct gtphub_seq_mapping {
 	uint16_t peer_seq; /* the new seq nr going out to the peer */
 	struct gtphub_peer *from;
 	uint16_t from_seq;
-	struct timeval timeout;
+	time_t expiry;
 };
 
 struct gtphub_bind {
@@ -194,6 +194,10 @@ struct gtphub {
 
 	/* pointers to an entry of to_ggsns[x].peers */
 	struct gtphub_peer *ggsn_proxy[GTPH_PORT_N];
+
+	struct osmo_timer_list gc_timer;
+
+	time_t now;
 };
 
 
