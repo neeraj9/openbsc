@@ -333,14 +333,6 @@ static time_t gtphub_now(void)
 	return now_tp.tv_sec;
 }
 
-/* obsolete */
-#if 0
-static time_t gtphub_expiry_in(int seconds)
-{
-	return gtphub_now() + seconds;
-}
-#endif
-
 
 /* nr_map, nr_pool */
 
@@ -616,58 +608,6 @@ static void gtphub_seqmap_del_cb(struct nr_mapping *nrm)
 	talloc_free(m);
 }
 
-/* obsolete */
-#if 0
-static struct gtphub_seqmap *gtphub_seqmap_get(struct llist_head *map,
-					       uint16_t *next_peer_seq,
-					       uint16_t orig_seq)
-{
-	struct gtphub_seqmap *m;
-
-	llist_for_each_entry(m, map, entry) {
-		if (m->from_seq == orig_seq)
-			break;
-	}
-
-	if (&m->entry == map) {
-		/* No entry exists yet. */
-		m = gtphub_seqmap_new();
-		m->peer_seq = (*next_peer_seq)++;
-		m->from_seq = orig_seq;
-		LOG("  MAP %d --> %d\n", (int)m->from_seq, (int)m->peer_seq);
-	}
-
-	m->expiry = gtphub_expiry_in(GTPH_SEQ_MAPPING_EXPIRY_SECS);
-
-	/* Store in to_peer's map, so when we later receive a GTP packet back
-	 * from to_peer, the seq nr can be unmapped to its origin. Add/move to
-	 * the tail to always sort by expiry, ascending. */
-	llist_del(&m->entry);
-	llist_add_tail(&m->entry, map);
-
-	return m;
-}
-
-/* obsolete */
-static struct gtphub_seqmap *gtphub_seqmap_get_rev(const struct llist_head *map,
-						   uint16_t mapped_seq)
-{
-	struct gtphub_seqmap *m;
-	llist_for_each_entry(m, map, entry) {
-		if (m->peer_seq == mapped_seq)
-			break;
-	}
-
-	if (&m->entry == map) {
-		/* not found. */
-		return NULL;
-	}
-
-	LOG("UNMAP %d <-- %d\n", (int)(m->from_seq), (int)mapped_seq);
-	return m;
-}
-#endif
-
 struct gtphub_seqmap *gtphub_seqmap_have(struct nr_map *map,
 					 uint16_t orig_seq)
 {
@@ -933,31 +873,6 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 	return gtphub_write(&hub->to_ggsns[port_idx].ofd, &ggsn->addr,
 			    (uint8_t*)p.data, p.data_len);
 }
-
-/* obsolete */
-#if 0
-static void gtphub_gc_peer(struct gtphub *hub, struct gtphub_peer *peer)
-{
-	struct gtphub_seqmap *m;
-	struct gtphub_seqmap *n;
-	llist_for_each_entry_safe(m, n, &peer->seqmap, entry) {
-		if (m->expiry <= hub->now) {
-			gtphub_seqmap_del(m);
-			LOG("expired: %d: seq mapping from %s to %s: %d->%d\n",
-			    (int)m->expiry,
-			    osmo_sockaddr_to_str(&m->from->addr),
-			    osmo_sockaddr_to_str(&peer->addr),
-			    (int)m->from_seq, (int)m->peer_seq);
-		}
-		else {
-			/* The seq mappings will always have monotonous expiry
-			 * values. When we hit an unexpired entry, only more
-			 * unexpired ones will follow. */
-			break;
-		}
-	}
-}
-#endif
 
 static void gtphub_gc_bind(struct gtphub *hub, struct gtphub_bind *b)
 {
