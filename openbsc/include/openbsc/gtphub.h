@@ -207,19 +207,15 @@ struct gtphub_peer {
 	struct llist_head entry;
 
 	struct osmo_sockaddr addr;
-	struct nr_map teim;
-	uint16_t next_peer_seq; /* the latest used sequence nr + 1 */
-	struct llist_head seqmap; /* of struct gtphub_seqmap */
+	struct nr_map tei_map;
+	struct nr_pool seq_pool;
+	struct nr_map seq_map;
 	unsigned int ref_count; /* references from other peers' seq_maps */
 };
 
 struct gtphub_seqmap {
-	struct llist_head entry;
-
-	uint16_t peer_seq; /* the new seq nr going out to the peer */
+	struct nr_mapping nrm;
 	struct gtphub_peer *from;
-	uint16_t from_seq;
-	time_t expiry;
 };
 
 struct gtphub_bind {
@@ -241,8 +237,7 @@ struct gtphub {
 	struct gtphub_peer *ggsn_proxy[GTPH_PORT_N];
 
 	struct osmo_timer_list gc_timer;
-
-	time_t now;
+	struct nr_map_expiry expire_seq_maps;
 };
 
 
@@ -254,11 +249,19 @@ int gtphub_cfg_read(struct gtphub_cfg *cfg, const char *config_file);
 void gtphub_zero(struct gtphub *hub);
 int gtphub_init(struct gtphub *hub, struct gtphub_cfg *cfg);
 
-/* Create a new gtphub_peer instance added to peers_list.
+/* Create a new gtphub_peer instance added to bind->peers.
  * Initialize to all-zero. Return a pointer to the new instance, or NULL on
  * error. */
-struct gtphub_peer *gtphub_peer_new(struct gtphub_bind *bind);
+struct gtphub_peer *gtphub_peer_new(struct gtphub *hub, struct gtphub_bind *bind);
 
 /* Remove a gtphub_peer from its list and free it. */
 void gtphub_peer_del(struct gtphub_peer *peer);
 
+/* Return a mapping from orig_seq, or create one if missing. The original and
+ * mapped seq numbers are found in gtphub_seqmap.nrm.orig and .repl.*/
+struct gtphub_seqmap *gtphub_seqmap_have(struct nr_map *map,
+					 uint16_t orig_seq);
+
+/* Return a mapping to mapped_seq, or NULL if not found. */
+struct gtphub_seqmap *gtphub_seqmap_get_inv(const struct nr_map *map,
+					    uint16_t mapped_seq);

@@ -333,10 +333,13 @@ static time_t gtphub_now(void)
 	return now_tp.tv_sec;
 }
 
+/* obsolete */
+#if 0
 static time_t gtphub_expiry_in(int seconds)
 {
 	return gtphub_now() + seconds;
 }
+#endif
 
 
 /* nr_map, nr_pool */
@@ -586,23 +589,35 @@ inline void set_seq(struct gtp_packet_desc *p, uint16_t seq)
 	p->data->gtp1l.h.seq = hton16(seq);
 }
 
-static struct gtphub_seqmap *gtphub_seqmap_new(void)
+static void gtphub_seqmap_del_cb(struct nr_mapping *nrm);
+
+static struct gtphub_seqmap *gtphub_seqmap_new(uint16_t orig_seq)
 {
 	struct gtphub_seqmap *n;
 	n = talloc_zero(osmo_gtphub_ctx, struct gtphub_seqmap);
 	OSMO_ASSERT(n);
+
+	nr_mapping_init(&n->nrm);
+	n->nrm.orig = orig_seq;
+	n->nrm.del_cb = gtphub_seqmap_del_cb;
 	return n;
 }
 
-static void gtphub_seqmap_del(struct gtphub_seqmap *m)
+static void gtphub_seqmap_del_cb(struct nr_mapping *nrm)
 {
-	llist_del(&m->entry);
+	struct gtphub_seqmap *m = container_of(nrm, struct gtphub_seqmap, nrm);
+	LOG("expired: %d: nr mapping from %s: %d->%d\n",
+	    (int)nrm->expiry,
+	    osmo_sockaddr_to_str(&m->from->addr),
+	    (int)nrm->orig, (int)nrm->repl);
 
 	if (m->from)
 		gtphub_peer_ref_count_dec(m->from);
 	talloc_free(m);
 }
 
+/* obsolete */
+#if 0
 static struct gtphub_seqmap *gtphub_seqmap_get(struct llist_head *map,
 					       uint16_t *next_peer_seq,
 					       uint16_t orig_seq)
@@ -633,6 +648,7 @@ static struct gtphub_seqmap *gtphub_seqmap_get(struct llist_head *map,
 	return m;
 }
 
+/* obsolete */
 static struct gtphub_seqmap *gtphub_seqmap_get_rev(const struct llist_head *map,
 						   uint16_t mapped_seq)
 {
@@ -650,19 +666,58 @@ static struct gtphub_seqmap *gtphub_seqmap_get_rev(const struct llist_head *map,
 	LOG("UNMAP %d <-- %d\n", (int)(m->from_seq), (int)mapped_seq);
 	return m;
 }
+#endif
+
+struct gtphub_seqmap *gtphub_seqmap_have(struct nr_map *map,
+					 uint16_t orig_seq)
+{
+	struct nr_mapping *nrm;
+	struct gtphub_seqmap *m;
+
+	nrm = nr_map_get(map, orig_seq);
+
+	if (!nrm) {
+		m = gtphub_seqmap_new(orig_seq);
+		nr_map_add(map, &m->nrm, gtphub_now());
+		LOG("MAP %d --> %d\n", (int)(m->nrm.orig), (int)(m->nrm.repl));
+	}
+	else {
+		/* restart expiry timeout */
+		nr_map_expiry_add(map->expiry, nrm, gtphub_now());
+		m = container_of(nrm, struct gtphub_seqmap, nrm);
+	}
+
+	OSMO_ASSERT(m);
+	return m;
+}
+
+struct gtphub_seqmap *gtphub_seqmap_get_inv(const struct nr_map *map,
+					    uint16_t mapped_seq)
+{
+	struct nr_mapping *nrm = nr_map_get_inv(map, mapped_seq);
+
+	if (!nrm)
+		return NULL;
+
+	struct gtphub_seqmap *m = container_of(nrm, struct gtphub_seqmap, nrm);
+	LOG("UNMAP %d <-- %d\n", (int)(nrm->orig), (int)(nrm->repl));
+	return m;
+}
 
 static int gtphub_map_seq(struct gtp_packet_desc *p,
 			  struct gtphub_peer *from_peer, struct gtphub_peer *to_peer)
 {
+	/* Store a mapping in to_peer's map, so when we later receive a GTP
+	 * packet back from to_peer, the seq nr can be unmapped back to its
+	 * origin (from_peer here). */
 	struct gtphub_seqmap *m;
-	m = gtphub_seqmap_get(&to_peer->seqmap, &to_peer->next_peer_seq,
-			      get_seq(p));
+	m = gtphub_seqmap_have(&to_peer->seq_map, get_seq(p));
 
 	m->from = from_peer;
 	gtphub_peer_ref_count_inc(m->from);
 
 	/* Change the GTP packet to yield the new, mapped seq nr */
-	set_seq(p, m->peer_seq);
+	set_seq(p, m->nrm.repl);
 
 	return 0;
 }
@@ -671,11 +726,11 @@ static struct gtphub_peer *gtphub_unmap_seq(struct gtp_packet_desc *p,
 					    struct gtphub_peer *replying_peer)
 {
 	OSMO_ASSERT(p->version == 1);
-	struct gtphub_seqmap *m = gtphub_seqmap_get_rev(&replying_peer->seqmap,
+	struct gtphub_seqmap *m = gtphub_seqmap_get_inv(&replying_peer->seq_map,
 							get_seq(p));
 	if (!m)
 		return NULL;
-	set_seq(p, m->from_seq);
+	set_seq(p, m->nrm.orig);
 	return m->from;
 }
 
@@ -774,12 +829,6 @@ int from_ggsns_read_cb(struct osmo_fd *from_ggsns_ofd, unsigned int what)
 #endif
 
 	if (!sgsn) {
-		/* TODO this will not be hardcoded. */
-		sgsn = llist_first(&hub->to_sgsns[port_idx].peers,
-				   struct gtphub_peer, entry);
-	}
-
-	if (!sgsn) {
 		LOGERR("no sgsn to send to\n");
 		return 0;
 	}
@@ -843,7 +892,7 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 		sgsn = llist_first(&hub->to_sgsns[port_idx].peers,
 				   struct gtphub_peer, entry);
 		if (!sgsn)
-			sgsn = gtphub_peer_new(&hub->to_sgsns[port_idx]);
+			sgsn = gtphub_peer_new(hub, &hub->to_sgsns[port_idx]);
 		memcpy(&sgsn->addr, &from_addr, sizeof(sgsn->addr));
 	}
 
@@ -885,6 +934,8 @@ int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
 			    (uint8_t*)p.data, p.data_len);
 }
 
+/* obsolete */
+#if 0
 static void gtphub_gc_peer(struct gtphub *hub, struct gtphub_peer *peer)
 {
 	struct gtphub_seqmap *m;
@@ -906,15 +957,15 @@ static void gtphub_gc_peer(struct gtphub *hub, struct gtphub_peer *peer)
 		}
 	}
 }
+#endif
 
 static void gtphub_gc_bind(struct gtphub *hub, struct gtphub_bind *b)
 {
 	struct gtphub_peer *p, *n;
 	llist_for_each_entry_safe(p, n, &b->peers, entry) {
-		gtphub_gc_peer(hub, p);
 
 		if ((!p->ref_count)
-		    && llist_empty(&p->seqmap)) {
+		    && nr_map_empty(&p->seq_map)) {
 
 			LOG("expired: peer %s\n",
 			    osmo_sockaddr_to_str(&p->addr));
@@ -925,14 +976,21 @@ static void gtphub_gc_bind(struct gtphub *hub, struct gtphub_bind *b)
 
 static void gtphub_gc_cb(void *data)
 {
+	int expired;
 	struct gtphub *hub = data;
+	time_t now;
+	
+	now = gtphub_now();
 
-	hub->now = gtphub_now();
+	expired = nr_map_expiry_tick(&hub->expire_seq_maps, now);
+	/* ... */
 
-	int i;
-	for (i = 0; i < GTPH_PORT_N; i++) {
-		gtphub_gc_bind(hub, &hub->to_sgsns[i]);
-		gtphub_gc_bind(hub, &hub->to_ggsns[i]);
+	if (expired) {
+		int i;
+		for (i = 0; i < GTPH_PORT_N; i++) {
+			gtphub_gc_bind(hub, &hub->to_sgsns[i]);
+			gtphub_gc_bind(hub, &hub->to_ggsns[i]);
+		}
 	}
 
 	osmo_timer_schedule(&hub->gc_timer, GTPH_GC_TICK, 0);
@@ -950,6 +1008,8 @@ int gtphub_init(struct gtphub *hub, struct gtphub_cfg *cfg)
 {
 	int rc;
 	gtphub_zero(hub);
+
+	nr_map_expiry_init(&hub->expire_seq_maps, GTPH_SEQ_MAPPING_EXPIRY_SECS);
 
 	int port_id;
 	for (port_id = 0; port_id < GTPH_PORT_N; port_id++) {
@@ -977,7 +1037,7 @@ int gtphub_init(struct gtphub *hub, struct gtphub_cfg *cfg)
 
 		/* trigger only on the control port address. */
 		if (cfg->sgsn_proxy[GTPH_PORT_CONTROL].addr_str) {
-			struct gtphub_peer *sgsn = gtphub_peer_new(&hub->to_sgsns[port_id]);
+			struct gtphub_peer *sgsn = gtphub_peer_new(hub, &hub->to_sgsns[port_id]);
 			struct gtphub_cfg_addr *addr = &cfg->sgsn_proxy[port_id];
 
 			rc = osmo_sockaddr_init(&sgsn->addr,
@@ -1006,7 +1066,7 @@ int gtphub_init(struct gtphub *hub, struct gtphub_cfg *cfg)
 	for (port_id = 0; port_id < GTPH_PORT_N; port_id++) {
 		/* trigger only on the control port address. */
 		if (cfg->ggsn_proxy[GTPH_PORT_CONTROL].addr_str) {
-			struct gtphub_peer *ggsn = gtphub_peer_new(&hub->to_ggsns[port_id]);
+			struct gtphub_peer *ggsn = gtphub_peer_new(hub, &hub->to_ggsns[port_id]);
 			struct gtphub_cfg_addr *addr = &cfg->ggsn_proxy[port_id];
 
 			rc = osmo_sockaddr_init(&ggsn->addr,
@@ -1036,16 +1096,19 @@ int gtphub_init(struct gtphub *hub, struct gtphub_cfg *cfg)
 	return 0;
 }
 
-struct gtphub_peer *gtphub_peer_new(struct gtphub_bind *bind)
+struct gtphub_peer *gtphub_peer_new(struct gtphub *hub, struct gtphub_bind *bind)
 {
 	struct gtphub_peer *n = talloc_zero(osmo_gtphub_ctx, struct gtphub_peer);
 
-	INIT_LLIST_HEAD(&n->seqmap);
-	nr_map_init(&n->teim, &bind->teip, NULL);
+	nr_map_init(&n->tei_map, &bind->teip, NULL);
+
+	nr_pool_init(&n->seq_pool);
+	nr_map_init(&n->seq_map, &n->seq_pool, &hub->expire_seq_maps);
+
 	/* TODO use something random to pick the initial sequence nr.
 	   0x6d31 produces the ASCII character sequence 'm1', currently used in
 	   gtphub_nc_test.sh. */
-	n->next_peer_seq = 0x6d31;
+	n->seq_pool.last_nr = 0x6d31 - 1;
 
 	llist_add(&n->entry, &bind->peers);
 	return n;
@@ -1053,12 +1116,7 @@ struct gtphub_peer *gtphub_peer_new(struct gtphub_bind *bind)
 
 void gtphub_peer_del(struct gtphub_peer *peer)
 {
-	struct gtphub_seqmap *m;
-	struct gtphub_seqmap *n;
-	llist_for_each_entry_safe(m, n, &peer->seqmap, entry) {
-		gtphub_seqmap_del(m);
-	}
-
+	nr_map_del(&peer->seq_map);
 	llist_del(&peer->entry);
 	talloc_free(peer);
 }
