@@ -21,6 +21,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 
 #include <osmocom/core/utils.h>
 #include <osmocom/core/msgb.h>
@@ -58,6 +59,20 @@ static struct nr_mapping *nr_mapping_alloc(void)
 	return m;
 }
 
+static struct nr_mapping *nr_map_have(struct nr_map *map, nr_t orig, time_t now)
+{
+	struct nr_mapping *mapping;
+
+	mapping = nr_map_get(map, orig);
+	if (!mapping) {
+		mapping = nr_mapping_alloc();
+		mapping->orig = orig;
+		nr_map_add(map, mapping, now);
+	}
+
+	return mapping;
+}
+
 static nr_t nr_map_get_repl(const struct nr_map *map, nr_t orig)
 {
 	struct nr_mapping *m;
@@ -75,9 +90,8 @@ static nr_t nr_map_get_orig(const struct nr_map *map, nr_t repl)
 }
 
 
-static void test_nr_map(void)
+static void test_nr_map_basic(void)
 {
-	/* Basic */
 	struct nr_pool _pool;
 	struct nr_pool *pool = &_pool;
 	struct nr_map _map;
@@ -97,12 +111,7 @@ static void test_nr_map(void)
 	/* create TEST_N mappings */
 	for (i = 0; i < TEST_N; i++) {
 		nr_t orig = TEST_I + i;
-		mapping = nr_map_get(map, orig);
-		if (!mapping) {
-			mapping = nr_mapping_alloc();
-			mapping->orig = orig;
-			nr_map_add(map, mapping, 0);
-		}
+		mapping = nr_map_have(map, orig, 0);
 		m[i] = mapping->repl;
 		OSMO_ASSERT(m[i] != 0);
 		OSMO_ASSERT(llist_len(&map->mappings) == (i+1));
@@ -129,6 +138,125 @@ static void test_nr_map(void)
 #undef TEST_I
 }
 
+static int seqmap_is(struct nr_map *map, const char *str)
+{
+	static char buf[4096];
+	char *pos = buf;
+	size_t len = sizeof(buf);
+	struct nr_mapping *m;
+	llist_for_each_entry(m, &map->mappings, entry) {
+		size_t wrote = snprintf(pos, len, "(%d->%d@%d), ",
+					(int)m->orig,
+					(int)m->repl,
+					(int)m->expiry);
+		OSMO_ASSERT(wrote < len);
+		pos += wrote;
+		len -= wrote;
+	}
+	*pos = '\0';
+
+	if (strncmp(buf, str, sizeof(buf)) != 0) {
+		printf("FAILURE: seqmap_is() mismatches expected value:\n"
+		       "expected: %s\n"
+		       "is:       %s\n",
+		       str, buf);
+		return 0;
+	}
+	return 1;
+}
+
+static void test_nr_map_expiry(void)
+{
+	struct nr_map_expiry expiry;
+	struct nr_pool pool;
+	struct nr_map map;
+	int i;
+
+	nr_map_expiry_init(&expiry, 30);
+	nr_pool_init(&pool);
+	nr_map_init(&map, &pool, &expiry);
+	OSMO_ASSERT(seqmap_is(&map, ""));
+
+	/* tick on empty map */
+	OSMO_ASSERT(nr_map_expiry_tick(&expiry, 10000) == 0);
+	OSMO_ASSERT(seqmap_is(&map, ""));
+
+#define MAP1 \
+	"(10->1@10040), " \
+	""
+
+#define MAP2 \
+	"(20->2@10050), " \
+	"(21->3@10051), " \
+	"(22->4@10052), " \
+	"(23->5@10053), " \
+	"(24->6@10054), " \
+	"(25->7@10055), " \
+	"(26->8@10056), " \
+	"(27->9@10057), " \
+	""
+
+#define MAP3 \
+	"(420->10@10072), " \
+	"(421->11@10072), " \
+	"(422->12@10072), " \
+	"(423->13@10072), " \
+	"(424->14@10072), " \
+	"(425->15@10072), " \
+	"(426->16@10072), " \
+	"(427->17@10072), " \
+	""
+
+	/* add mapping at time 10010. */
+	nr_map_have(&map, 10, 10010);
+	OSMO_ASSERT(seqmap_is(&map, MAP1));
+
+	/* tick on unexpired item. */
+	OSMO_ASSERT(nr_map_expiry_tick(&expiry, 10010) == 0);
+	OSMO_ASSERT(nr_map_expiry_tick(&expiry, 10011) == 0);
+	OSMO_ASSERT(seqmap_is(&map, MAP1));
+
+	/* Spread mappings at 10020, 10021, ... 10027. */
+	for (i = 0; i < 8; i++)
+		nr_map_have(&map, 20 + i, 10020 + i);
+	OSMO_ASSERT(seqmap_is(&map, MAP1 MAP2));
+
+	/* tick on unexpired items. */
+	OSMO_ASSERT(nr_map_expiry_tick(&expiry, 10030) == 0);
+	OSMO_ASSERT(nr_map_expiry_tick(&expiry, 10039) == 0);
+	OSMO_ASSERT(seqmap_is(&map, MAP1 MAP2));
+
+	/* expire the first item (from 10010). */
+	OSMO_ASSERT(nr_map_expiry_tick(&expiry, 10010 + 30) == 1);
+	OSMO_ASSERT(seqmap_is(&map, MAP2));
+
+	/* again nothing to expire */
+	OSMO_ASSERT(nr_map_expiry_tick(&expiry, 10041) == 0);
+	OSMO_ASSERT(seqmap_is(&map, MAP2));
+
+	/* Mappings all at the same time. */
+	for (i = 0; i < 8; i++)
+		nr_map_have(&map, 420 + i, 10042);
+	OSMO_ASSERT(seqmap_is(&map, MAP2 MAP3));
+
+	/* Eight to expire, were added further above to be chronologically
+	 * correct, at 10020..10027. */
+	OSMO_ASSERT(nr_map_expiry_tick(&expiry, 10027 + 30) == 8);
+	OSMO_ASSERT(seqmap_is(&map, MAP3));
+
+	/* again nothing to expire */
+	OSMO_ASSERT(nr_map_expiry_tick(&expiry, 10027 + 30) == 0);
+	OSMO_ASSERT(seqmap_is(&map, MAP3));
+
+	/* Eight to expire, from 10042. Now at 10042 + 30: */
+	OSMO_ASSERT(nr_map_expiry_tick(&expiry, 10042 + 30) == 8);
+	OSMO_ASSERT(seqmap_is(&map, ""));
+
+#undef MAP1
+#undef MAP2
+#undef MAP3
+}
+
 static struct log_info_cat gtphub_categories[] = {
 	[DGTPHUB] = {
 		.name = "DGTPHUB",
@@ -148,10 +276,12 @@ int main(int argc, char **argv)
 	osmo_init_logging(&info);
 	osmo_gtphub_ctx = talloc_named_const(NULL, 0, "osmo_gtphub");
 
-	test_nr_map();
+	test_nr_map_basic();
+	test_nr_map_expiry();
 	printf("Done\n");
 
 	talloc_report_full(osmo_gtphub_ctx, stderr);
+	OSMO_ASSERT(talloc_total_blocks(osmo_gtphub_ctx) == 1);
 	return 0;
 }
 
