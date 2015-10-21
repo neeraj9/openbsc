@@ -357,10 +357,12 @@ nr_t nr_pool_next(struct nr_pool *pool)
 	return pool->last_nr;
 }
 
-void nr_map_init(struct nr_map *map, struct nr_pool *pool)
+void nr_map_init(struct nr_map *map, struct nr_pool *pool,
+		 struct nr_map_expiry *exq)
 {
 	ZERO_STRUCT(map);
 	map->pool = pool;
+	map->expiry = exq;
 	INIT_LLIST_HEAD(&map->mappings);
 }
 
@@ -368,12 +370,33 @@ void nr_mapping_init(struct nr_mapping *m)
 {
 	ZERO_STRUCT(m);
 	INIT_LLIST_HEAD(&m->entry);
+	INIT_LLIST_HEAD(&m->expiry_entry);
 }
 
-void nr_map_add(struct nr_map *map, struct nr_mapping *mapping)
+void nr_map_add(struct nr_map *map, struct nr_mapping *mapping, time_t now)
 {
+	/* Generate a mapped number */
 	mapping->repl = nr_pool_next(map->pool);
-	llist_add(&mapping->entry, &map->mappings);
+
+	/* Add to the tail to always yield a list sorted by expiry, in
+	 * ascending order. */
+	llist_add_tail(&mapping->entry, &map->mappings);
+	if (map->expiry)
+		nr_map_expiry_add(map->expiry, mapping, now);
+}
+
+void nr_map_del(struct nr_map *map)
+{
+	struct nr_mapping *m;
+	struct nr_mapping *n;
+	llist_for_each_entry_safe(m, n, &map->mappings, entry) {
+		nr_mapping_del(m);
+	}
+}
+
+int nr_map_empty(const struct nr_map *map)
+{
+	return llist_empty(&map->mappings);
 }
 
 struct nr_mapping *nr_map_get(const struct nr_map *map, nr_t nr_orig)
@@ -403,6 +426,46 @@ void nr_mapping_del(struct nr_mapping *mapping)
 {
 	OSMO_ASSERT(mapping);
 	llist_del(&mapping->entry);
+	llist_del(&mapping->expiry_entry);
+	if (mapping->del_cb)
+		(mapping->del_cb)(mapping);
+}
+
+void nr_map_expiry_init(struct nr_map_expiry *exq, int expiry_in_seconds)
+{
+	ZERO_STRUCT(exq);
+	exq->expiry_in_seconds = expiry_in_seconds;
+	INIT_LLIST_HEAD(&exq->mappings);
+}
+
+void nr_map_expiry_add(struct nr_map_expiry *exq, struct nr_mapping *mapping,
+		       time_t now)
+{
+	mapping->expiry = now + exq->expiry_in_seconds;
+
+	/* Add/move to the tail to always sort by expiry, ascending. */
+	llist_del(&mapping->expiry_entry);
+	llist_add_tail(&mapping->expiry_entry, &exq->mappings);
+}
+
+int nr_map_expiry_tick(struct nr_map_expiry *exq, time_t now)
+{
+	int expired = 0;
+	struct nr_mapping *m;
+	struct nr_mapping *n;
+	llist_for_each_entry_safe(m, n, &exq->mappings, expiry_entry) {
+		if (m->expiry <= now) {
+			nr_mapping_del(m);
+			expired ++;
+		}
+		else {
+			/* The items are added sorted by expiry. So when we hit
+			 * an unexpired entry, only more unexpired ones will
+			 * follow. */
+			break;
+		}
+	}
+	return expired;
 }
 
 
@@ -978,7 +1041,7 @@ struct gtphub_peer *gtphub_peer_new(struct gtphub_bind *bind)
 	struct gtphub_peer *n = talloc_zero(osmo_gtphub_ctx, struct gtphub_peer);
 
 	INIT_LLIST_HEAD(&n->seqmap);
-	nr_map_init(&n->teim, &bind->teip);
+	nr_map_init(&n->teim, &bind->teip, NULL);
 	/* TODO use something random to pick the initial sequence nr.
 	   0x6d31 produces the ASCII character sequence 'm1', currently used in
 	   gtphub_nc_test.sh. */

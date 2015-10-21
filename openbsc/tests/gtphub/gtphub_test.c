@@ -44,11 +44,17 @@ static int llist_len(struct llist_head *head)
 	return i;
 }
 
+static void nr_mapping_free(struct nr_mapping *m)
+{
+	talloc_free(m);
+}
+
 static struct nr_mapping *nr_mapping_alloc(void)
 {
 	struct nr_mapping *m;
 	m = talloc(osmo_gtphub_ctx, struct nr_mapping);
 	nr_mapping_init(m);
+	m->del_cb = nr_mapping_free;
 	return m;
 }
 
@@ -78,7 +84,7 @@ static void test_nr_map(void)
 	struct nr_map *map = &_map;
 
 	nr_pool_init(pool);
-	nr_map_init(map, pool);
+	nr_map_init(map, pool, NULL);
 
 	OSMO_ASSERT(llist_empty(&map->mappings));
 
@@ -95,7 +101,7 @@ static void test_nr_map(void)
 		if (!mapping) {
 			mapping = nr_mapping_alloc();
 			mapping->orig = orig;
-			nr_map_add(map, mapping);
+			nr_map_add(map, mapping, 0);
 		}
 		m[i] = mapping->repl;
 		OSMO_ASSERT(m[i] != 0);

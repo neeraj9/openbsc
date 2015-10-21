@@ -111,21 +111,44 @@ void nr_pool_init(struct nr_pool *pool);
 nr_t nr_pool_next(struct nr_pool *pool);
 
 
+struct nr_mapping;
+
+typedef void (*nr_mapping_del_cb_t)(struct nr_mapping *);
+
 struct nr_mapping {
 	struct llist_head entry;
+	struct llist_head expiry_entry;
+	time_t expiry;
 
 	nr_t orig;
 	nr_t repl;
+
+	nr_mapping_del_cb_t del_cb;
+};
+
+struct nr_map_expiry {
+	int expiry_in_seconds;
+	struct llist_head mappings;
 };
 
 struct nr_map {
 	struct nr_pool *pool; /* multiple nr_maps can share a nr_pool. */
+	struct nr_map_expiry *expiry;
 	struct llist_head mappings;
 };
 
 /* Initialize an (already allocated) nr_map, and set the map's number pool.
- * Multiple nr_map instances may use the same nr_pool. */
-void nr_map_init(struct nr_map *map, struct nr_pool *pool);
+ * Multiple nr_map instances may use the same nr_pool. Set the nr_map's expiry
+ * queue to exq, so that all added mappings are automatically expired after the
+ * time configured in exq. exq may be NULL to disable automatic expiry. */
+void nr_map_init(struct nr_map *map, struct nr_pool *pool,
+		 struct nr_map_expiry *exq);
+
+/* Remove all mappings from map. */
+void nr_map_del(struct nr_map *map);
+
+/* Return 1 if map has no entries, 0 otherwise. */
+int nr_map_empty(const struct nr_map *map);
 
 /* Return a known mapping from nr_orig. If nr_orig is unknown, return NULL. */
 struct nr_mapping *nr_map_get(const struct nr_map *map, nr_t nr_orig);
@@ -133,7 +156,8 @@ struct nr_mapping *nr_map_get(const struct nr_map *map, nr_t nr_orig);
 /* Return a known mapping to nr_repl. If nr_repl is unknown, return NULL. */
 struct nr_mapping *nr_map_get_inv(const struct nr_map *map, nr_t nr_repl);
 
-/* Remove the given mapping from its parent map. */
+/* Remove the given mapping from its parent map and expiry queue, and call
+ * mapping->del_cb, if set. */
 void nr_mapping_del(struct nr_mapping *mapping);
 
 /* Initialize the nr_mapping to zero/empty values. */
@@ -141,8 +165,21 @@ void nr_mapping_init(struct nr_mapping *mapping);
 
 /* Add a new entry to the map. mapping->orig and mapping->del_cb must be set
  * before calling this function. The remaining fields of *mapping will be
- * overwritten. */
-void nr_map_add(struct nr_map *map, struct nr_mapping *mapping);
+ * overwritten. Set mapping->repl to the next available mapped number from
+ * map->pool. 'now' is the current clock count in seconds; if no map->expiry is
+ * used, just pass 0 for 'now'. */
+void nr_map_add(struct nr_map *map, struct nr_mapping *mapping,
+		time_t now);
+
+void nr_map_expiry_init(struct nr_map_expiry *exq, int expiry_in_seconds);
+
+/* Add a new mapping, or restart the expiry timeout for an already listed mapping. */
+void nr_map_expiry_add(struct nr_map_expiry *exq, struct nr_mapping *mapping, time_t now);
+
+/* Carry out due expiry of mappings. Must be invoked regularly.
+ * 'now' is the current clock count in seconds and must correspond to the clock
+ * count passed to nr_map_add(). A monotonous clock counter should be used. */
+int nr_map_expiry_tick(struct nr_map_expiry *exq, time_t now);
 
 
 /* config */
