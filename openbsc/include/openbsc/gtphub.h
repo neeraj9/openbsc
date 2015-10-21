@@ -127,16 +127,22 @@ struct nr_map {
  * Multiple nr_map instances may use the same nr_pool. */
 void nr_map_init(struct nr_map *map, struct nr_pool *pool);
 
-/* Return a replacement number for nr_orig. If nr_orig is unknown, create a new
- * mapping using a so far unused number to map nr_orig to. Return 0 on error. */
-nr_t nr_map_get(struct nr_map *map, nr_t nr_orig);
+/* Return a known mapping from nr_orig. If nr_orig is unknown, return NULL. */
+struct nr_mapping *nr_map_get(const struct nr_map *map, nr_t nr_orig);
 
-/* Return the original number for a replacement number. If no mapping exists to
- * nr_repl, return 0. */
-nr_t nr_map_get_inv(struct nr_map *map, nr_t nr_repl);
+/* Return a known mapping to nr_repl. If nr_repl is unknown, return NULL. */
+struct nr_mapping *nr_map_get_inv(const struct nr_map *map, nr_t nr_repl);
 
-/* Remove the mapping for nr_orig, if it exists. */
-void nr_map_del(struct nr_map *map, nr_t nr_orig);
+/* Remove the given mapping from its parent map. */
+void nr_mapping_del(struct nr_mapping *mapping);
+
+/* Initialize the nr_mapping to zero/empty values. */
+void nr_mapping_init(struct nr_mapping *mapping);
+
+/* Add a new entry to the map. mapping->orig and mapping->del_cb must be set
+ * before calling this function. The remaining fields of *mapping will be
+ * overwritten. */
+void nr_map_add(struct nr_map *map, struct nr_mapping *mapping);
 
 
 /* config */

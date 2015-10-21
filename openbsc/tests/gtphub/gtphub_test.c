@@ -44,6 +44,31 @@ static int llist_len(struct llist_head *head)
 	return i;
 }
 
+static struct nr_mapping *nr_mapping_alloc(void)
+{
+	struct nr_mapping *m;
+	m = talloc(osmo_gtphub_ctx, struct nr_mapping);
+	nr_mapping_init(m);
+	return m;
+}
+
+static nr_t nr_map_get_repl(const struct nr_map *map, nr_t orig)
+{
+	struct nr_mapping *m;
+	m = nr_map_get(map, orig);
+	OSMO_ASSERT(m);
+	return m->repl;
+}
+
+static nr_t nr_map_get_orig(const struct nr_map *map, nr_t repl)
+{
+	struct nr_mapping *m;
+	m = nr_map_get_inv(map, repl);
+	OSMO_ASSERT(m);
+	return m->orig;
+}
+
+
 static void test_nr_map(void)
 {
 	/* Basic */
@@ -61,10 +86,18 @@ static void test_nr_map(void)
 #define TEST_I 123
 	uint32_t i, check_i;
 	uint32_t m[TEST_N];
+	struct nr_mapping *mapping;
 
 	/* create TEST_N mappings */
 	for (i = 0; i < TEST_N; i++) {
-		m[i] = nr_map_get(map, TEST_I + i);
+		nr_t orig = TEST_I + i;
+		mapping = nr_map_get(map, orig);
+		if (!mapping) {
+			mapping = nr_mapping_alloc();
+			mapping->orig = orig;
+			nr_map_add(map, mapping);
+		}
+		m[i] = mapping->repl;
 		OSMO_ASSERT(m[i] != 0);
 		OSMO_ASSERT(llist_len(&map->mappings) == (i+1));
 		for (check_i = 0; check_i < i; check_i++)
@@ -74,15 +107,16 @@ static void test_nr_map(void)
 
 	/* verify mappings */
 	for (i = 0; i < TEST_N; i++) {
-		OSMO_ASSERT(nr_map_get(map, TEST_I + i) == m[i]);
-		OSMO_ASSERT(nr_map_get_rev(map, m[i]) == (TEST_I + i));
+		nr_t orig = TEST_I + i;
+		OSMO_ASSERT(nr_map_get_repl(map, orig) == m[i]);
+		OSMO_ASSERT(nr_map_get_orig(map, m[i]) == orig);
 	}
-	OSMO_ASSERT(llist_len(&map->mappings) == TEST_N);
 
 	/* remove all mappings */
 	for (i = 0; i < TEST_N; i++) {
-		nr_map_del(map, TEST_I + i);
-		OSMO_ASSERT(llist_len(&map->mappings) == (TEST_N - (i+1)));
+		OSMO_ASSERT(llist_len(&map->mappings) == (TEST_N - i));
+		nr_t orig = TEST_I + i;
+		nr_mapping_del(nr_map_get(map, orig));
 	}
 	OSMO_ASSERT(llist_empty(&map->mappings));
 #undef TEST_N

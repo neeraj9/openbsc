@@ -364,56 +364,45 @@ void nr_map_init(struct nr_map *map, struct nr_pool *pool)
 	INIT_LLIST_HEAD(&map->mappings);
 }
 
-static nr_t nr_map_new(struct nr_map *map, nr_t nr_orig)
+void nr_mapping_init(struct nr_mapping *m)
 {
-	struct nr_mapping *mapping;
-	mapping = talloc_zero(osmo_gtphub_ctx, struct nr_mapping);
-	OSMO_ASSERT(mapping);
-	mapping->orig = nr_orig;
-	mapping->repl = nr_pool_next(map->pool);
-	llist_add(&mapping->entry, &map->mappings);
-	return mapping->repl;
+	ZERO_STRUCT(m);
+	INIT_LLIST_HEAD(&m->entry);
 }
 
-nr_t nr_map_get(struct nr_map *map, nr_t nr_orig)
+void nr_map_add(struct nr_map *map, struct nr_mapping *mapping)
 {
-	OSMO_ASSERT(nr_orig != 0);
+	mapping->repl = nr_pool_next(map->pool);
+	llist_add(&mapping->entry, &map->mappings);
+}
 
+struct nr_mapping *nr_map_get(const struct nr_map *map, nr_t nr_orig)
+{
 	struct nr_mapping *mapping;
 	llist_for_each_entry(mapping, &map->mappings, entry) {
 		if (mapping->orig == nr_orig)
-			return mapping->repl;
+			return mapping;
 	}
 	/* Not found. */
-
-	return nr_map_new(map, nr_orig);
+	return NULL;
 }
 
-nr_t nr_map_get_inv(struct nr_map *map, nr_t nr_repl)
-{
-	OSMO_ASSERT(nr_repl != 0);
-
-	struct nr_mapping *pos;
-	llist_for_each_entry(pos, &map->mappings, entry) {
-		if (pos->repl == nr_repl) {
-			OSMO_ASSERT(pos->orig);
-			return pos->orig;
-		}
-	}
-	return 0;
-}
-
-void nr_map_del(struct nr_map *map, nr_t nr_orig)
+struct nr_mapping *nr_map_get_inv(const struct nr_map *map, nr_t nr_repl)
 {
 	struct nr_mapping *mapping;
 	llist_for_each_entry(mapping, &map->mappings, entry) {
-		if (mapping->orig == nr_orig) {
-			llist_del(&mapping->entry);
-			talloc_free(mapping);
-			return;
+		if (mapping->repl == nr_repl) {
+			return mapping;
 		}
 	}
-	LOGERR("No mapping exists for TEI %" PRIu32 ".\n", nr_orig);
+	/* Not found. */
+	return NULL;
+}
+
+void nr_mapping_del(struct nr_mapping *mapping)
+{
+	OSMO_ASSERT(mapping);
+	llist_del(&mapping->entry);
 }
 
 
