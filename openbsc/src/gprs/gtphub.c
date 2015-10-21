@@ -339,63 +339,63 @@ static time_t gtphub_expiry_in(int seconds)
 }
 
 
-/* tei_map, tei_pool */
+/* nr_map, nr_pool */
 
-void tei_pool_init(struct tei_pool *pool)
+void nr_pool_init(struct nr_pool *pool)
 {
-	*pool = (struct tei_pool){};
+	*pool = (struct nr_pool){};
 }
 
-uint32_t tei_pool_next(struct tei_pool *pool)
+nr_t nr_pool_next(struct nr_pool *pool)
 {
-	pool->last_tei ++;
+	pool->last_nr ++;
 
-	OSMO_ASSERT(pool->last_tei > 0);
+	OSMO_ASSERT(pool->last_nr > 0);
 	/* TODO: gracefully handle running out of TEIs. */
 	/* TODO: random TEIs. */
 
-	return pool->last_tei;
+	return pool->last_nr;
 }
 
-void tei_map_init(struct tei_map *map, struct tei_pool *pool)
+void nr_map_init(struct nr_map *map, struct nr_pool *pool)
 {
 	ZERO_STRUCT(map);
 	map->pool = pool;
 	INIT_LLIST_HEAD(&map->mappings);
 }
 
-static uint32_t tei_map_new(struct tei_map *map, uint32_t tei_orig)
+static nr_t nr_map_new(struct nr_map *map, nr_t nr_orig)
 {
-	struct tei_mapping *mapping;
-	mapping = talloc_zero(osmo_gtphub_ctx, struct tei_mapping);
+	struct nr_mapping *mapping;
+	mapping = talloc_zero(osmo_gtphub_ctx, struct nr_mapping);
 	OSMO_ASSERT(mapping);
-	mapping->orig = tei_orig;
-	mapping->repl = tei_pool_next(map->pool);
+	mapping->orig = nr_orig;
+	mapping->repl = nr_pool_next(map->pool);
 	llist_add(&mapping->entry, &map->mappings);
 	return mapping->repl;
 }
 
-uint32_t tei_map_get(struct tei_map *map, uint32_t tei_orig)
+nr_t nr_map_get(struct nr_map *map, nr_t nr_orig)
 {
-	OSMO_ASSERT(tei_orig != 0);
+	OSMO_ASSERT(nr_orig != 0);
 
-	struct tei_mapping *mapping;
+	struct nr_mapping *mapping;
 	llist_for_each_entry(mapping, &map->mappings, entry) {
-		if (mapping->orig == tei_orig)
+		if (mapping->orig == nr_orig)
 			return mapping->repl;
 	}
 	/* Not found. */
 
-	return tei_map_new(map, tei_orig);
+	return nr_map_new(map, nr_orig);
 }
 
-uint32_t tei_map_get_rev(struct tei_map *map, uint32_t tei_repl)
+nr_t nr_map_get_inv(struct nr_map *map, nr_t nr_repl)
 {
-	OSMO_ASSERT(tei_repl != 0);
+	OSMO_ASSERT(nr_repl != 0);
 
-	struct tei_mapping *pos;
+	struct nr_mapping *pos;
 	llist_for_each_entry(pos, &map->mappings, entry) {
-		if (pos->repl == tei_repl) {
+		if (pos->repl == nr_repl) {
 			OSMO_ASSERT(pos->orig);
 			return pos->orig;
 		}
@@ -403,17 +403,17 @@ uint32_t tei_map_get_rev(struct tei_map *map, uint32_t tei_repl)
 	return 0;
 }
 
-void tei_map_del(struct tei_map *map, uint32_t tei_orig)
+void nr_map_del(struct nr_map *map, nr_t nr_orig)
 {
-	struct tei_mapping *mapping;
+	struct nr_mapping *mapping;
 	llist_for_each_entry(mapping, &map->mappings, entry) {
-		if (mapping->orig == tei_orig) {
+		if (mapping->orig == nr_orig) {
 			llist_del(&mapping->entry);
 			talloc_free(mapping);
 			return;
 		}
 	}
-	LOGERR("No mapping exists for TEI %" PRIu32 ".\n", tei_orig);
+	LOGERR("No mapping exists for TEI %" PRIu32 ".\n", nr_orig);
 }
 
 
@@ -465,7 +465,7 @@ static int gtphub_gtp_bind_init(struct gtphub_bind *b,
 {
 	ZERO_STRUCT(b);
 
-	tei_pool_init(&b->teip);
+	nr_pool_init(&b->teip);
 	INIT_LLIST_HEAD(&b->peers);
 
 	if (gtphub_sock_init(&b->ofd, &cfg->bind, cb, cb_data, ofd_id) != 0)
@@ -989,7 +989,7 @@ struct gtphub_peer *gtphub_peer_new(struct gtphub_bind *bind)
 	struct gtphub_peer *n = talloc_zero(osmo_gtphub_ctx, struct gtphub_peer);
 
 	INIT_LLIST_HEAD(&n->seqmap);
-	tei_map_init(&n->teim, &bind->teip);
+	nr_map_init(&n->teim, &bind->teip);
 	/* TODO use something random to pick the initial sequence nr.
 	   0x6d31 produces the ASCII character sequence 'm1', currently used in
 	   gtphub_nc_test.sh. */

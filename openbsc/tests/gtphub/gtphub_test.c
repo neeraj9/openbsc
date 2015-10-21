@@ -44,16 +44,16 @@ static int llist_len(struct llist_head *head)
 	return i;
 }
 
-static void test_tei_map(void)
+static void test_nr_map(void)
 {
 	/* Basic */
-	struct tei_pool _pool;
-	struct tei_pool *pool = &_pool;
-	struct tei_map _map;
-	struct tei_map *map = &_map;
+	struct nr_pool _pool;
+	struct nr_pool *pool = &_pool;
+	struct nr_map _map;
+	struct nr_map *map = &_map;
 
-	tei_pool_init(pool);
-	tei_map_init(map, pool);
+	nr_pool_init(pool);
+	nr_map_init(map, pool);
 
 	OSMO_ASSERT(llist_empty(&map->mappings));
 
@@ -64,7 +64,7 @@ static void test_tei_map(void)
 
 	/* create TEST_N mappings */
 	for (i = 0; i < TEST_N; i++) {
-		m[i] = tei_map_get(map, TEST_I + i);
+		m[i] = nr_map_get(map, TEST_I + i);
 		OSMO_ASSERT(m[i] != 0);
 		OSMO_ASSERT(llist_len(&map->mappings) == (i+1));
 		for (check_i = 0; check_i < i; check_i++)
@@ -74,14 +74,14 @@ static void test_tei_map(void)
 
 	/* verify mappings */
 	for (i = 0; i < TEST_N; i++) {
-		OSMO_ASSERT(tei_map_get(map, TEST_I + i) == m[i]);
-		OSMO_ASSERT(tei_map_get_rev(map, m[i]) == (TEST_I + i));
+		OSMO_ASSERT(nr_map_get(map, TEST_I + i) == m[i]);
+		OSMO_ASSERT(nr_map_get_rev(map, m[i]) == (TEST_I + i));
 	}
 	OSMO_ASSERT(llist_len(&map->mappings) == TEST_N);
 
 	/* remove all mappings */
 	for (i = 0; i < TEST_N; i++) {
-		tei_map_del(map, TEST_I + i);
+		nr_map_del(map, TEST_I + i);
 		OSMO_ASSERT(llist_len(&map->mappings) == (TEST_N - (i+1)));
 	}
 	OSMO_ASSERT(llist_empty(&map->mappings));
@@ -108,7 +108,7 @@ int main(int argc, char **argv)
 	osmo_init_logging(&info);
 	osmo_gtphub_ctx = talloc_named_const(NULL, 0, "osmo_gtphub");
 
-	test_tei_map();
+	test_nr_map();
 	printf("Done\n");
 
 	talloc_report_full(osmo_gtphub_ctx, stderr);

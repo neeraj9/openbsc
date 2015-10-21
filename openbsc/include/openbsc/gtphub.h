@@ -97,44 +97,46 @@ enum gtphub_port_idx {
 extern const char* const gtphub_port_idx_names[GTPH_PORT_N];
 
 
-/* Generator for unused TEI IDs. So far this counts upwards from zero, but the
+typedef int nr_t;
+
+/* Generator for unused numbers. So far this counts upwards from zero, but the
  * implementation may change in the future. Treat this like an opaque struct. */
-struct tei_pool {
-	uint32_t last_tei;
+struct nr_pool {
+	nr_t last_nr;
 };
 
-void tei_pool_init(struct tei_pool *pool);
+void nr_pool_init(struct nr_pool *pool);
 
-/* Return the next unused TEI from the tei_pool. */
-uint32_t tei_pool_next(struct tei_pool *pool);
+/* Return the next unused number from the nr_pool. */
+nr_t nr_pool_next(struct nr_pool *pool);
 
 
-struct tei_mapping {
+struct nr_mapping {
 	struct llist_head entry;
 
-	uint32_t orig;
-	uint32_t repl;
+	nr_t orig;
+	nr_t repl;
 };
 
-struct tei_map {
-	struct tei_pool *pool; /* multiple tei_maps can share a tei_pool. */
+struct nr_map {
+	struct nr_pool *pool; /* multiple nr_maps can share a nr_pool. */
 	struct llist_head mappings;
 };
 
-/* Initialize an (already allocated) tei_map, and set the map's TEI pool.
- * Multiple tei_map instances may use the same tei_pool. */
-void tei_map_init(struct tei_map *map, struct tei_pool *pool);
+/* Initialize an (already allocated) nr_map, and set the map's number pool.
+ * Multiple nr_map instances may use the same nr_pool. */
+void nr_map_init(struct nr_map *map, struct nr_pool *pool);
 
-/* Return a replacement TEI for tei_orig. If tei_orig is unknown, create a new
- * mapping using a so far unused TEI to map tei_orig to. Return 0 on error. */
-uint32_t tei_map_get(struct tei_map *map, uint32_t tei_orig);
+/* Return a replacement number for nr_orig. If nr_orig is unknown, create a new
+ * mapping using a so far unused number to map nr_orig to. Return 0 on error. */
+nr_t nr_map_get(struct nr_map *map, nr_t nr_orig);
 
-/* Return the original TEI for a replacement TEI. If no mapping exists to
- * tei_repl, return 0. */
-uint32_t tei_map_get_rev(struct tei_map *map, uint32_t tei_repl);
+/* Return the original number for a replacement number. If no mapping exists to
+ * nr_repl, return 0. */
+nr_t nr_map_get_inv(struct nr_map *map, nr_t nr_repl);
 
-/* Remove the mapping for tei_orig, if it exists. */
-void tei_map_del(struct tei_map *map, uint32_t tei_orig);
+/* Remove the mapping for nr_orig, if it exists. */
+void nr_map_del(struct nr_map *map, nr_t nr_orig);
 
 
 /* config */
@@ -162,7 +164,7 @@ struct gtphub_peer {
 	struct llist_head entry;
 
 	struct osmo_sockaddr addr;
-	struct tei_map teim;
+	struct nr_map teim;
 	uint16_t next_peer_seq; /* the latest used sequence nr + 1 */
 	struct llist_head seqmap; /* of struct gtphub_seqmap */
 	unsigned int ref_count; /* references from other peers' seq_maps */
@@ -179,7 +181,7 @@ struct gtphub_seqmap {
 
 struct gtphub_bind {
 	struct osmo_fd ofd;
-	struct tei_pool teip;
+	struct nr_pool teip;
 
 	/* list of struct gtphub_peer */
 	struct llist_head peers;
