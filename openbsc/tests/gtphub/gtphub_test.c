@@ -257,6 +257,21 @@ static void test_nr_map_expiry(void)
 #undef MAP3
 }
 
+static void test_seq_map(void)
+{
+	struct nr_pool _pool;
+	struct nr_pool *pool = &_pool;
+
+	struct nr_map _map;
+	struct nr_map *map = &_map;
+
+	nr_map_init(map, pool, NULL);
+
+//	struct gtphub_seqmap *m = gtphub_seqmap_have(map, 123);
+
+//	OSMO_ASSERT(m);
+}
+
 static struct log_info_cat gtphub_categories[] = {
 	[DGTPHUB] = {
 		.name = "DGTPHUB",
@@ -278,6 +293,7 @@ int main(int argc, char **argv)
 
 	test_nr_map_basic();
 	test_nr_map_expiry();
+	test_seq_map();
 	printf("Done\n");
 
 	talloc_report_full(osmo_gtphub_ctx, stderr);
