@@ -15,6 +15,9 @@ AC_PROG_CC
 AC_PROG_INSTALL
 AC_PROG_RANLIB
 
+# HACK: enable dirty fixes before better ones are made
+CFLAGS+=" -DDIRTY_HACK_RESET_LLC_STATE=1"
+
 dnl checks for libraries
 AC_SEARCH_LIBS([dlopen], [dl dld], [LIBRARY_DL="$LIBS";LIBS=""])
 AC_SUBST(LIBRARY_DL)
