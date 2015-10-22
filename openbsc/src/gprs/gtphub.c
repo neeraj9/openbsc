@@ -701,6 +701,14 @@ static int gtphub_write(struct osmo_fd *to,
 	return 0;
 }
 
+int from_ggsns_handle_buf(struct gtphub *hub,
+			  unsigned int port_idx,
+			  const struct osmo_sockaddr *from_addr,
+			  uint8_t *buf,
+			  size_t received,
+			  struct osmo_fd **to_ofd,
+			  struct osmo_sockaddr **to_addr);
+
 int from_ggsns_read_cb(struct osmo_fd *from_ggsns_ofd, unsigned int what)
 {
 	unsigned int port_idx = from_ggsns_ofd->priv_nr;
@@ -713,11 +721,29 @@ int from_ggsns_read_cb(struct osmo_fd *from_ggsns_ofd, unsigned int what)
 
 	static uint8_t buf[4096];
 	struct osmo_sockaddr from_addr;
-	size_t received = gtphub_read(from_ggsns_ofd, &from_addr,
-				      buf, sizeof(buf));
-	if (received < 1)
+	struct osmo_sockaddr *to_addr;
+	struct osmo_fd *to_ofd;
+	size_t len;
+	
+	len = gtphub_read(from_ggsns_ofd, &from_addr, buf, sizeof(buf));
+	if (len < 1)
 		return 0;
 
+	len = from_ggsns_handle_buf(hub, port_idx, &from_addr, buf, len, &to_ofd, &to_addr);
+	if (len < 1)
+		return 0;
+
+	return gtphub_write(to_ofd, to_addr, buf, len);
+}
+
+int from_ggsns_handle_buf(struct gtphub *hub,
+			  unsigned int port_idx,
+			  const struct osmo_sockaddr *from_addr,
+			  uint8_t *buf,
+			  size_t received,
+			  struct osmo_fd **to_ofd,
+			  struct osmo_sockaddr **to_addr)
+{
 	static struct gtp_packet_desc p;
 	gtp_decode(buf, received, &p);
 
@@ -730,15 +756,15 @@ int from_ggsns_read_cb(struct osmo_fd *from_ggsns_ofd, unsigned int what)
 	 * talking to us. */
 	struct gtphub_peer *ggsn = hub->ggsn_proxy[port_idx];
 	if (ggsn
-	    && ((ggsn->addr.l != from_addr.l)
-		|| (memcmp(&ggsn->addr.a, &from_addr.a,
-			   from_addr.l) != 0)
+	    && ((ggsn->addr.l != from_addr->l)
+		|| (memcmp(&ggsn->addr.a, &from_addr->a,
+			   from_addr->l) != 0)
 	       )
 	   ){
 		LOGERR("Rejecting: GGSN proxy configured, but GTP packet"
 		       " received on GGSN bind is from another sender:...\n");
 		LOGERR("... proxy: %s\n", osmo_sockaddr_to_str(&ggsn->addr));
-		LOGERR("...sender: %s\n", osmo_sockaddr_to_str(&from_addr));
+		LOGERR("...sender: %s\n", osmo_sockaddr_to_str(from_addr));
 		return 0;
 	}
 
@@ -781,8 +807,10 @@ int from_ggsns_read_cb(struct osmo_fd *from_ggsns_ofd, unsigned int what)
 		gtphub_map_seq(&p, ggsn, sgsn);
 #endif
 
-	return gtphub_write(&hub->to_sgsns[port_idx].ofd, &sgsn->addr,
-			    (uint8_t*)p.data, p.data_len);
+	*to_ofd = &hub->to_sgsns[port_idx].ofd;
+	*to_addr = &sgsn->addr;
+
+	return received;
 }
 
 int from_sgsns_read_cb(struct osmo_fd *from_sgsns_ofd, unsigned int what)
