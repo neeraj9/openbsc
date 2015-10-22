@@ -103,6 +103,7 @@ typedef int nr_t;
  * implementation may change in the future. Treat this like an opaque struct. */
 struct nr_pool {
 	nr_t last_nr;
+	/* TODO add min, max, for safe wrapping */
 };
 
 void nr_pool_init(struct nr_pool *pool);
